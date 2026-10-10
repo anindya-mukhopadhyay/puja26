@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import styles from "./page.module.css";
+import PujaMap from "@/components/PujaMap";
+import { firebaseConfigured } from "@/lib/firebase";
+import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
 type Place = { id: number; name: string; locality: string; category: Category; rating?: string; reviews?: number; distance: string; color: string; x: number; y: number; facilities: string[]; description: string };
@@ -14,6 +17,9 @@ const places: Place[] = [
   { id: 5, name: "Public Drinking Water", locality: "Lake Town", category: "Food", distance: "0.4 km", color: "#F5BD32", x: 77, y: 50, facilities: ["Drinking water"], description: "Public drinking-water point." },
   { id: 6, name: "Public Convenience", locality: "Hatibagan", category: "Toilet", distance: "1.1 km", color: "#5D75A6", x: 35, y: 25, facilities: ["Accessible toilet"], description: "Public facility, hours pending verification." },
 ];
+
+const fallbackPandal = (place: Place): Pandal => ({ id: `sample-${place.id}`, name: place.name, address: place.locality, locality: place.locality, latitude: 22.5726 + (place.y - 50) / 300, longitude: 88.3639 + (place.x - 50) / 300, status: "published", createdBy: "sample" });
+const placeFromPandal = (pandal: Pandal): Place => ({ id: Number(pandal.id.replace(/\D/g, "")) || 1000, name: pandal.name, locality: pandal.locality || pandal.address || "Kolkata", category: "Pandal", rating: undefined, reviews: undefined, distance: "Location confirmed", color: "#C62828", x: 50, y: 50, facilities: [], description: pandal.description || "Published by a verified Puja26 administrator." });
 
 const nav = [
   ["map", "⌖", "Map"], ["routes", "⌁", "Routes"], ["connect", "◎", "Connect"], ["groups", "♧", "Groups"], ["profile", "◉", "Profile"],
@@ -30,6 +36,13 @@ export default function Home() {
   const [route, setRoute] = useState<Place[]>([places[0], places[2]]);
   const [locationNotice, setLocationNotice] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [livePandals, setLivePandals] = useState<Pandal[]>([]);
+  const [mapDataError, setMapDataError] = useState("");
+
+  useEffect(() => {
+    if (!firebaseConfigured) return;
+    return subscribeToPublishedPandals(setLivePandals, () => setMapDataError("Pandal updates are temporarily unavailable. Please try again shortly."));
+  }, []);
 
   const visible = useMemo(() => places.filter((p) => (filter === "All" || p.category === filter) && `${p.name} ${p.locality} ${p.category}`.toLowerCase().includes(query.toLowerCase())), [filter, query]);
   const toggleSaved = (id: number) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
@@ -52,12 +65,9 @@ export default function Home() {
           {(["All", "Pandal", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={filter === item ? styles.chipActive : ""}>{item === "All" ? "All places" : item === "Pandal" ? "Puja pandals" : item}</button>)}
         </div>
         <div className={styles.mapCard}>
-          <div className={styles.mapTexture}></div><span className={`${styles.road} ${styles.roadOne}`}></span><span className={`${styles.road} ${styles.roadTwo}`}></span><span className={`${styles.road} ${styles.roadThree}`}></span>
-          <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Pandals</span><span><i className={styles.greenDot}></i> Facilities</span></div>
-          {visible.map((place) => <button key={place.id} className={`${styles.pin} ${selected.id === place.id ? styles.selectedPin : ""}`} onClick={() => setSelected(place)} style={{ left: `${place.x}%`, top: `${place.y}%`, background: place.color }} aria-label={`Show ${place.name}`}><span>{place.category === "Pandal" ? "♜" : place.category === "Metro" ? "M" : "●"}</span></button>)}
-          <button className={styles.locate} onClick={() => setLocationNotice(true)} aria-label="Use current location">⌖</button>
-          <div className={styles.mapLabel}>KOLKATA</div>
-          {locationNotice && <div className={styles.toast}>Location access is requested only when you choose it. <button onClick={() => setLocationNotice(false)}>Got it</button></div>}
+          <PujaMap pandals={firebaseConfigured ? livePandals : visible.map(fallbackPandal)} selectedId={firebaseConfigured ? undefined : `sample-${selected.id}`} onSelect={(pandal) => setSelected(placeFromPandal(pandal))} />
+          <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Published pandals</span><span><i className={styles.greenDot}></i> Live updates</span></div>
+          {mapDataError && <div className={styles.toast}>{mapDataError}<button onClick={() => setMapDataError("")}>Dismiss</button></div>}
         </div>
         <article className={styles.placeCard}>
           <div className={styles.placePhoto}><span>দুর্গা</span></div>
