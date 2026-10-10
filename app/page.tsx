@@ -507,13 +507,23 @@ export default function Home() {
             </p>
             <h2>{sortByNearest ? "Nearest Pandals" : "Published Pandals"}</h2>
           </div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <div className={styles.nearbyActions}>
             {sortByNearest && (
-              <button className={styles.resetSortBtn} onClick={() => setSortByNearest(false)}>
+              <button
+                className={styles.resetSortBtn}
+                onClick={() => setSortByNearest(false)}
+                title="Reset proximity sorting"
+              >
                 Reset
               </button>
             )}
-            <button onClick={() => setFilter("Pandal")}>See all</button>
+            <button
+              className={filter === "Pandal" ? styles.seeAllBtnActive : styles.seeAllBtn}
+              onClick={() => setFilter(filter === "Pandal" ? "All" : "Pandal")}
+              title="Filter to published pandals"
+            >
+              {filter === "Pandal" ? "All places" : "See all pandals →"}
+            </button>
           </div>
         </div>
         <div className={styles.nearby}>
