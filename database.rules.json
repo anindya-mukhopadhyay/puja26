@@ -1,0 +1,17 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": { "$uid": { ".read": "auth != null && auth.uid === $uid", ".write": "auth != null && auth.uid === $uid" } },
+    "groupLocations": {
+      "$groupId": {
+        "$uid": {
+          ".read": "auth != null && root.child('groupMembers').child($groupId).child(auth.uid).val() === true",
+          ".write": "auth != null && auth.uid === $uid && root.child('groupMembers').child($groupId).child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['lat','lng','updatedAt','sharing']) && newData.child('lat').isNumber() && newData.child('lng').isNumber() && newData.child('lat').val() >= -90 && newData.child('lat').val() <= 90 && newData.child('lng').val() >= -180 && newData.child('lng').val() <= 180"
+        }
+      }
+    },
+    "groupMembers": { "$groupId": { "$uid": { ".read": "auth != null && auth.uid === $uid", ".write": false } } }
+  }
+}
