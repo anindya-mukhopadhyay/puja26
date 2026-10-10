@@ -24,11 +24,14 @@ export default function AreaPandalSelectorModal({
   userCoords,
   onApplyRoute,
 }: Props) {
-  // Selected areas (e.g. ["North Kolkata", "South Kolkata"])
+  // Selected areas
   const [selectedAreas, setSelectedAreas] = useState<PujoArea[]>([
     "North Kolkata",
     "South Kolkata",
   ]);
+
+  // How many pandals to auto-suggest per area when not specifically selected
+  const [pandalsPerArea, setPandalsPerArea] = useState<number | "all">(3);
 
   // Specific pandals explicitly checked by the user
   const [selectedPandalIds, setSelectedPandalIds] = useState<string[]>([]);
@@ -48,6 +51,23 @@ export default function AreaPandalSelectorModal({
     );
   };
 
+  // Select all pandals in an area
+  const selectAllInArea = (area: PujoArea) => {
+    const areaPandals = getPandalsInArea(area, allLocations);
+    const newIds = new Set(selectedPandalIds);
+    areaPandals.forEach((p) => newIds.add(p.id));
+    setSelectedPandalIds(Array.from(newIds));
+    if (!selectedAreas.includes(area)) {
+      setSelectedAreas((prev) => [...prev, area]);
+    }
+  };
+
+  // Clear all pandals in an area
+  const clearAllInArea = (area: PujoArea) => {
+    const areaPandalIds = new Set(getPandalsInArea(area, allLocations).map((p) => p.id));
+    setSelectedPandalIds((prev) => prev.filter((id) => !areaPandalIds.has(id)));
+  };
+
   // Compute preview of optimized route in real time
   const preview = useMemo(() => {
     return optimizeMultiAreaRoute({
@@ -55,9 +75,10 @@ export default function AreaPandalSelectorModal({
       selectedPandalIds,
       allLocations,
       startCoords: userCoords,
+      pandalsPerArea,
       travelMode: "walking",
     });
-  }, [selectedAreas, selectedPandalIds, allLocations, userCoords]);
+  }, [selectedAreas, selectedPandalIds, allLocations, userCoords, pandalsPerArea]);
 
   if (!isOpen) return null;
 
@@ -87,9 +108,9 @@ export default function AreaPandalSelectorModal({
           background: "#FFF9F0",
           border: "1px solid #E8DCCB",
           borderRadius: 20,
-          maxWidth: 520,
+          maxWidth: 540,
           width: "100%",
-          maxHeight: "90vh",
+          maxHeight: "92vh",
           overflowY: "auto",
           padding: 22,
           boxShadow: "0 12px 40px rgba(120, 13, 25, 0.2)",
@@ -98,6 +119,7 @@ export default function AreaPandalSelectorModal({
       >
         <button
           onClick={onClose}
+          aria-label="Close modal"
           style={{
             position: "absolute",
             top: 14,
@@ -127,12 +149,12 @@ export default function AreaPandalSelectorModal({
             Select Areas &amp; Pandals
           </h2>
           <p style={{ margin: 0, fontSize: 11, color: "#70676A" }}>
-            Pick areas you want to visit. Select specific pandals, or let Puja26 auto-recommend the best from each area!
+            Choose areas to visit. Pick specific pandals or adjust auto-suggestions per area!
           </p>
         </div>
 
         {/* 1. Area Selector Chips */}
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 11, fontWeight: 700, marginBottom: 6, color: "#191516" }}>
             1. Select Areas to Visit ({selectedAreas.length} selected)
           </label>
@@ -171,10 +193,10 @@ export default function AreaPandalSelectorModal({
                   </div>
                   <span style={{ fontSize: 9, color: "#70676A", marginTop: 4 }}>
                     {specificCount > 0
-                      ? `${specificCount} chosen`
+                      ? `✓ ${specificCount} of ${pandalsInArea.length} chosen`
                       : isSelected
-                      ? "⚡ Auto-picks top 2"
-                      : `${pandalsInArea.length} pandals`}
+                      ? `⚡ Auto-picks ${pandalsPerArea === "all" ? "all" : `top ${pandalsPerArea}`}`
+                      : `${pandalsInArea.length} pandals available`}
                   </span>
                 </div>
               );
@@ -182,13 +204,60 @@ export default function AreaPandalSelectorModal({
           </div>
         </div>
 
-        {/* 2. Specific Pandal Selection per Area */}
+        {/* 2. Configure How Many Pandals to Suggest Per Area */}
+        <div
+          style={{
+            background: "#FFF",
+            border: "1px solid #E8DCCB",
+            borderRadius: 12,
+            padding: "10px 14px",
+            marginBottom: 14,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          <div>
+            <strong style={{ fontSize: 11, color: "#191516", display: "block" }}>
+              Pandals to visit per area:
+            </strong>
+            <small style={{ fontSize: 9, color: "#70676A" }}>
+              Applied when no specific pandals are checked in that area
+            </small>
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {([2, 3, 4, 5, "all"] as const).map((count) => (
+              <button
+                key={String(count)}
+                type="button"
+                onClick={() => setPandalsPerArea(count)}
+                style={{
+                  padding: "4px 9px",
+                  borderRadius: 6,
+                  border: "1px solid",
+                  borderColor: pandalsPerArea === count ? "#780D19" : "#E8DCCB",
+                  background: pandalsPerArea === count ? "#780D19" : "#FFF9F0",
+                  color: pandalsPerArea === count ? "#FFF" : "#191516",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                {count === "all" ? "All" : count}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 3. Specific Pandal Selection per Area */}
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 700, marginBottom: 6, color: "#191516" }}>
-            2. Choose Specific Pandals (Optional)
+          <label style={{ display: "block", fontSize: 11, fontWeight: 700, marginBottom: 4, color: "#191516" }}>
+            2. Choose Specific Pandals or Select All
           </label>
           <p style={{ margin: "0 0 8px", fontSize: 10, color: "#70676A" }}>
-            Leave blank in an area to automatically include its top-rated pandals.
+            Expand an area to add extra pandals or select all with 1-click:
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -207,31 +276,70 @@ export default function AreaPandalSelectorModal({
                     overflow: "hidden",
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => setExpandedArea(isExpanded ? null : area)}
+                  <div
                     style={{
-                      width: "100%",
                       padding: "9px 12px",
                       background: "#FFF",
-                      border: "none",
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      cursor: "pointer",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#191516",
                     }}
                   >
-                    <span>
-                      {area}{" "}
-                      <small style={{ fontWeight: 400, color: "#70676A" }}>
-                        ({chosenHere.length > 0 ? `${chosenHere.length} selected` : "⚡ Auto-suggest active"})
-                      </small>
-                    </span>
-                    <span>{isExpanded ? "▲" : "▼"}</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedArea(isExpanded ? null : area)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#191516",
+                        flex: 1,
+                      }}
+                    >
+                      <span>
+                        {area}{" "}
+                        <small style={{ fontWeight: 400, color: "#70676A" }}>
+                          ({chosenHere.length > 0 ? `${chosenHere.length} of ${areaPandals.length} selected` : `⚡ Auto-picks top ${pandalsPerArea}`})
+                        </small>
+                      </span>
+                    </button>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (chosenHere.length === areaPandals.length) {
+                            clearAllInArea(area);
+                          } else {
+                            selectAllInArea(area);
+                          }
+                        }}
+                        style={{
+                          background: "#FFF9F0",
+                          border: "1px solid #780D19",
+                          borderRadius: 6,
+                          padding: "2px 7px",
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: "#780D19",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {chosenHere.length === areaPandals.length ? "Deselect All" : "Select All"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedArea(isExpanded ? null : area)}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#70676A" }}
+                      >
+                        {isExpanded ? "▲" : "▼"}
+                      </button>
+                    </div>
+                  </div>
 
                   {isExpanded && (
                     <div style={{ padding: "8px 12px 12px", borderTop: "1px solid #F0EAE1", display: "flex", flexDirection: "column", gap: 6 }}>
@@ -273,7 +381,7 @@ export default function AreaPandalSelectorModal({
           </div>
         </div>
 
-        {/* 3. Real-Time Recommended Multi-Area Route Preview */}
+        {/* 4. Real-Time Recommended Multi-Area Route Preview */}
         <div
           style={{
             background: "#FFF",
@@ -283,9 +391,9 @@ export default function AreaPandalSelectorModal({
             marginBottom: 16,
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
             <h3 style={{ fontFamily: "'Playfair Display', serif", margin: 0, fontSize: 16, color: "#780D19" }}>
-              Optimized Tour Sequence
+              Optimized Tour Sequence (2-Opt Path)
             </h3>
             <span style={{ fontSize: 10, fontWeight: 700, color: "#26734D" }}>
               {preview.routeStops.length} stops · {preview.totalDistanceKm} km
@@ -293,10 +401,10 @@ export default function AreaPandalSelectorModal({
           </div>
 
           <p style={{ margin: "0 0 10px", fontSize: 10, color: "#70676A" }}>
-            Sorted in smooth geographical progression without city backtracking.
+            Sorted along Kolkata&apos;s transit corridor with 2-Opt local search to prevent backtracking.
           </p>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
             {preview.routeStops.map((stop, idx) => {
               const isAuto = preview.autoSuggestedIds.includes(stop.id);
               return (
@@ -323,6 +431,7 @@ export default function AreaPandalSelectorModal({
                       placeItems: "center",
                       fontSize: 10,
                       fontWeight: 700,
+                      flexShrink: 0,
                     }}
                   >
                     {idx + 1}
@@ -336,7 +445,7 @@ export default function AreaPandalSelectorModal({
                     </span>
                   </div>
                   {isAuto && (
-                    <span style={{ fontSize: 8, fontWeight: 700, color: "#B58427", background: "#FEF7E6", padding: "2px 5px", borderRadius: 4 }}>
+                    <span style={{ fontSize: 8, fontWeight: 700, color: "#B58427", background: "#FEF7E6", padding: "2px 5px", borderRadius: 4, flexShrink: 0 }}>
                       Auto-Suggested
                     </span>
                   )}

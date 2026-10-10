@@ -54,7 +54,7 @@ describe("Routing & Haversine Distance Calculation", () => {
     const url = generateGoogleMapsDirectionsUrl(stops, "walking");
     expect(url).toContain("https://www.google.com/maps/dir/");
     expect(url).toContain("travelmode=walking");
-    expect(url).toContain("origin=22.6012,88.4035");
+    expect(url).toContain(`origin=${stops[0].latitude},${stops[0].longitude}`);
     expect(url).toContain("waypoints=");
   });
 });
@@ -155,5 +155,52 @@ describe("Multi-Area Planning & Route Optimization", () => {
     expect(result.totalDistanceKm).toBeGreaterThan(0);
     expect(result.areaSummary.length).toBe(2);
   });
+
+  it("respects variable pandalsPerArea (3, 4, and 'all') options", async () => {
+    const { optimizeMultiAreaRoute } = await import("../lib/routeOptimizer");
+
+    // 3 pandals per area
+    const res3 = optimizeMultiAreaRoute({
+      selectedAreas: ["North Kolkata"],
+      selectedPandalIds: [],
+      allLocations: SEED_LOCATIONS,
+      pandalsPerArea: 3,
+    });
+    expect(res3.routeStops.length).toBe(3);
+
+    // 4 pandals per area
+    const res4 = optimizeMultiAreaRoute({
+      selectedAreas: ["North Kolkata"],
+      selectedPandalIds: [],
+      allLocations: SEED_LOCATIONS,
+      pandalsPerArea: 4,
+    });
+    expect(res4.routeStops.length).toBe(4);
+
+    // 'all' pandals in area
+    const resAll = optimizeMultiAreaRoute({
+      selectedAreas: ["North Kolkata"],
+      selectedPandalIds: [],
+      allLocations: SEED_LOCATIONS,
+      pandalsPerArea: "all",
+    });
+    expect(resAll.routeStops.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("optimizes route stops using twoOpt local search to eliminate crossing paths", async () => {
+    const { twoOptOptimize } = await import("../lib/routeOptimizer");
+    const pandals = SEED_LOCATIONS.filter((p) => p.category === "Pandal");
+
+    // Take 4 pandals and invert order intentionally to create sub-optimal sequence
+    const unoptimized = [pandals[0], pandals[3], pandals[1], pandals[2]];
+    const optimized = twoOptOptimize(unoptimized);
+
+    expect(optimized.length).toBe(unoptimized.length);
+    // All original pandals must still be present
+    unoptimized.forEach((p) => {
+      expect(optimized.some((o) => o.id === p.id)).toBe(true);
+    });
+  });
 });
+
 

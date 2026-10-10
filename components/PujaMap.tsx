@@ -15,6 +15,8 @@ type Props = {
   pin?: Coordinates | null;
   onPinChange?: (point: Coordinates) => void;
   liveMembers?: LiveLocation[];
+  routeStops?: LocationItem[];
+  showRoutePath?: boolean;
   className?: string;
 };
 
@@ -46,6 +48,8 @@ export default function PujaMap({
   pin,
   onPinChange,
   liveMembers = [],
+  routeStops = [],
+  showRoutePath = false,
   className,
 }: Props) {
   const elementRef = useRef<HTMLDivElement>(null);
@@ -54,6 +58,9 @@ export default function PujaMap({
   const memberMarkersRef = useRef<google.maps.Marker[]>([]);
   const userMarkerRef = useRef<google.maps.Marker | null>(null);
   const editMarkerRef = useRef<google.maps.Marker | null>(null);
+  const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+
   const [state, setState] = useState<"loading" | "ready" | "error" | "missing">(
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? "loading" : "missing"
   );
@@ -99,6 +106,12 @@ export default function PujaMap({
       markersRef.current.forEach((marker) => marker.setMap(null));
       memberMarkersRef.current.forEach((marker) => marker.setMap(null));
       userMarkerRef.current?.setMap(null);
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.setMap(null);
+      }
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
+      }
     };
   }, [editable, onPinChange]);
 
@@ -108,27 +121,45 @@ export default function PujaMap({
     if (!map || state !== "ready") return;
 
     markersRef.current.forEach((marker) => marker.setMap(null));
+
+    // Map stop IDs to their 1-indexed order if routeStops are provided
+    const routeOrderMap = new Map<string, number>();
+    routeStops.forEach((stop, index) => {
+      routeOrderMap.set(stop.id, index + 1);
+    });
+
     markersRef.current = pandals
       .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
       .map((p) => {
         const isSelected = p.id === selectedId;
+        const routeOrder = showRoutePath ? routeOrderMap.get(p.id) : undefined;
         const color = CATEGORY_COLORS[p.category] || "#C62828";
 
-        const marker = new google.maps.Marker({
+        const markerOptions: google.maps.MarkerOptions = {
           position: { lat: p.latitude, lng: p.longitude },
           map,
-          title: `${p.name} (${p.category})`,
-          zIndex: isSelected ? 25 : 5,
+          title: routeOrder ? `#${routeOrder} ${p.name}` : `${p.name} (${p.category})`,
+          zIndex: isSelected ? 30 : routeOrder ? 20 : 5,
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
-            scale: isSelected ? 12 : p.category === "Pandal" ? 9 : 7,
-            fillColor: isSelected ? "#780D19" : color,
+            scale: isSelected ? 13 : routeOrder ? 11 : p.category === "Pandal" ? 9 : 7,
+            fillColor: isSelected ? "#780D19" : routeOrder ? "#C62828" : color,
             fillOpacity: 1,
-            strokeColor: isSelected ? "#F5BD32" : "#FFF9F0",
-            strokeWeight: isSelected ? 4 : 2,
+            strokeColor: isSelected ? "#F5BD32" : routeOrder ? "#FFFFFF" : "#FFF9F0",
+            strokeWeight: isSelected ? 4 : routeOrder ? 3 : 2,
           },
-        });
+        };
 
+        if (routeOrder) {
+          markerOptions.label = {
+            text: String(routeOrder),
+            color: "#FFFFFF",
+            fontSize: "10px",
+            fontWeight: "bold",
+          };
+        }
+
+        const marker = new google.maps.Marker(markerOptions);
         marker.addListener("click", () => {
           onSelect?.(p);
           map.panTo({ lat: p.latitude, lng: p.longitude });
@@ -143,7 +174,7 @@ export default function PujaMap({
       if (active && Number.isFinite(active.latitude) && Number.isFinite(active.longitude)) {
         map.panTo({ lat: active.latitude, lng: active.longitude });
       }
-    } else if (pandals.length > 0 && !pin) {
+    } else if (pandals.length > 0 && !pin && !showRoutePath) {
       const bounds = new google.maps.LatLngBounds();
       let hasValidCoords = false;
       pandals.forEach((p) => {
@@ -156,7 +187,89 @@ export default function PujaMap({
         map.fitBounds(bounds, { top: 40, right: 30, bottom: 40, left: 30 });
       }
     }
-  }, [pandals, selectedId, onSelect, pin, state]);
+  }, [pandals, selectedId, onSelect, pin, routeStops, showRoutePath, state]);
+
+  // Render Pathfinding Polyline or Google Maps DirectionsRenderer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || state !== "ready") return;
+
+    // Clean up previous directions / polyline
+    if (directionsRendererRef.current) {
+      directionsRendererRef.current.setMap(null);
+      directionsRendererRef.current = null;
+    }
+    if (polylineRef.current) {
+      polylineRef.current.setMap(null);
+      polylineRef.current = null;
+    }
+
+    if (!showRoutePath || routeStops.length < 2) return;
+
+    const validStops = routeStops.filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
+    if (validStops.length < 2) return;
+
+    // Try Google Maps DirectionsService
+    if (validStops.length <= 10 && typeof google !== "undefined" && google.maps?.DirectionsService) {
+      const directionsService = new google.maps.DirectionsService();
+      const directionsRenderer = new google.maps.DirectionsRenderer({
+        map,
+        suppressMarkers: true, // We already draw our styled numbered markers!
+        polylineOptions: {
+          strokeColor: "#780D19", // Puja26 dark maroon
+          strokeOpacity: 0.85,
+          strokeWeight: 5,
+        },
+      });
+      directionsRendererRef.current = directionsRenderer;
+
+      const origin = { lat: validStops[0].latitude, lng: validStops[0].longitude };
+      const destination = { lat: validStops[validStops.length - 1].latitude, lng: validStops[validStops.length - 1].longitude };
+      const waypoints = validStops.slice(1, -1).map((s) => ({
+        location: new google.maps.LatLng(s.latitude, s.longitude),
+        stopover: true,
+      }));
+
+      directionsService.route(
+        {
+          origin,
+          destination,
+          waypoints,
+          travelMode: google.maps.TravelMode.WALKING,
+        },
+        (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK && result) {
+            directionsRenderer.setDirections(result);
+          } else {
+            // Directions quota or walk path unavailable -> draw clean geodesic polyline
+            drawGeodesicPolyline(map, validStops);
+          }
+        }
+      );
+    } else {
+      // More than 10 stops or DirectionsService unavailable -> draw clean geodesic polyline
+      drawGeodesicPolyline(map, validStops);
+    }
+
+    // Fit map bounds around all route stops
+    const bounds = new google.maps.LatLngBounds();
+    validStops.forEach((s) => bounds.extend({ lat: s.latitude, lng: s.longitude }));
+    map.fitBounds(bounds, { top: 50, right: 35, bottom: 50, left: 35 });
+  }, [routeStops, showRoutePath, state]);
+
+  // Helper to draw styled geodesic polyline
+  const drawGeodesicPolyline = (map: google.maps.Map, stops: LocationItem[]) => {
+    const path = stops.map((s) => ({ lat: s.latitude, lng: s.longitude }));
+    const polyline = new google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: "#C62828",
+      strokeOpacity: 0.9,
+      strokeWeight: 4,
+      map,
+    });
+    polylineRef.current = polyline;
+  };
 
   // Render Live Group Members
   useEffect(() => {
@@ -172,7 +285,7 @@ export default function PujaMap({
           position: { lat: m.lat, lng: m.lng },
           map,
           title: `${m.displayName} (${isStale ? "Stale GPS" : "Live GPS"})`,
-          zIndex: 30,
+          zIndex: 35,
           label: {
             text: m.displayName.slice(0, 1).toUpperCase(),
             color: "#FFFFFF",

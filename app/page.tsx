@@ -104,6 +104,7 @@ export default function Home() {
     SEED_LOCATIONS[2],
   ]);
   const [travelMode, setTravelMode] = useState<"walking" | "transit" | "driving">("walking");
+  const [showRouteOnMap, setShowRouteOnMap] = useState(false);
   const [savedItineraries, setSavedItineraries] = useState<Itinerary[]>([]);
   const [itinerarySavedNotice, setItinerarySavedNotice] = useState("");
 
@@ -619,6 +620,66 @@ export default function Home() {
               ))}
             </div>
 
+            {/* Route Status Banner if stops exist */}
+            {routeStops.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 10,
+                  padding: "8px 12px",
+                  background: "#FFF",
+                  borderRadius: 10,
+                  border: "1px solid #E8DCCB",
+                  fontSize: 11,
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13 }}>🗺️</span>
+                  <div>
+                    <strong style={{ color: "#780D19" }}>{routeStops.length} Stops in Route</strong>
+                    <span style={{ color: "#70676A", marginLeft: 4 }}>({activeDay.split(" ")[0]})</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowRouteOnMap(!showRouteOnMap)}
+                    style={{
+                      background: showRouteOnMap ? "#780D19" : "#FFF9F0",
+                      color: showRouteOnMap ? "#FFF" : "#780D19",
+                      border: "1px solid #780D19",
+                      borderRadius: 6,
+                      padding: "4px 9px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {showRouteOnMap ? "✓ Path On" : "Show Path"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("routes")}
+                    style={{
+                      background: "#FFF",
+                      color: "#70676A",
+                      border: "1px solid #E8DCCB",
+                      borderRadius: 6,
+                      padding: "4px 8px",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Route details ›
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Google Map */}
             <div className={styles.mapCard}>
               <PujaMap
@@ -626,6 +687,8 @@ export default function Home() {
                 selectedId={selectedPlace.id}
                 onSelect={(loc) => setSelectedPlace(loc)}
                 liveMembers={groupLiveLocations}
+                routeStops={routeStops}
+                showRoutePath={showRouteOnMap}
               />
               <div className={styles.mapLegend}>
                 <span>
@@ -1017,6 +1080,36 @@ export default function Home() {
               <div style={{ background: "#E8F5E9", color: "#26734D", padding: 10, borderRadius: 8, fontSize: 11, marginBottom: 10, textAlign: "center", fontWeight: 700 }}>
                 {itinerarySavedNotice}
               </div>
+            )}
+
+            {/* View Route Path on Interactive Map Button */}
+            {routeStops.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRouteOnMap(true);
+                  setActiveTab("map");
+                }}
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#F5BD32",
+                  color: "#191516",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  marginBottom: 10,
+                  boxShadow: "0 2px 8px rgba(245, 189, 50, 0.25)",
+                }}
+              >
+                🗺️ View Route Path on Interactive Map ({routeStops.length} stops)
+              </button>
             )}
 
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -1459,6 +1552,7 @@ export default function Home() {
         availableLocations={locations}
         onApplyRoute={(stops) => {
           setRouteStops(stops);
+          setShowRouteOnMap(true);
           setActiveTab("routes");
         }}
       />
@@ -1470,6 +1564,7 @@ export default function Home() {
         userCoords={userCoords || undefined}
         onApplyRoute={(stops) => {
           setRouteStops(stops);
+          setShowRouteOnMap(true);
           setActiveTab("routes");
         }}
       />
