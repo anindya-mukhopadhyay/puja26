@@ -75,6 +75,40 @@
   margin-bottom: 24px;
 }
 
+.emptyCard {
+  background: #fff;
+  border: 1px dashed #deb887;
+  border-radius: 16px;
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.emptyMotif {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #fdf5e6;
+  color: #c98c25;
+  font-size: 20px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 12px;
+}
+
+.emptyCard h3 {
+  font: 600 18px 'Playfair Display', serif;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+
+.emptyCard p {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 320px;
+  margin: 0 auto 16px;
+  line-height: 1.4;
+}
+
 .groupCard {
   display: flex;
   align-items: center;

@@ -9,6 +9,7 @@ import { auth, firebaseConfigured } from "@/lib/firebase";
 import { signOutUser } from "@/lib/auth";
 import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
 import GroupsManager from "@/components/GroupsManager";
+import { getStoredGroups, type PujaGroup } from "@/lib/groups";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
 type Place = {
@@ -29,16 +30,12 @@ type Place = {
   description: string;
 };
 
-const samplePlaces: Place[] = [
-  { id: "sample-1", name: "Sreebhumi Sporting Club", locality: "Lake Town, Kolkata", category: "Pandal", rating: "4.8", reviews: 248, distance: "1.2 km", color: "#C62828", x: 50, y: 31, facilities: ["Accessible entry", "Drinking water", "First aid"], description: "A celebrated neighbourhood pujo with verified visitor facilities." },
-  { id: "sample-2", name: "Mohammad Ali Park", locality: "Central Kolkata", category: "Pandal", rating: "4.7", reviews: 186, distance: "2.6 km", color: "#C62828", x: 22, y: 57, facilities: ["Food nearby", "Rest area"], description: "Festival location added by a verified Puja26 admin." },
-  { id: "sample-3", name: "Sovabazar Rajbari", locality: "North Kolkata", category: "Pandal", rating: "4.9", reviews: 319, distance: "3.4 km", color: "#C62828", x: 69, y: 16, facilities: ["Wheelchair access", "Toilets nearby"], description: "Historic pujo with an accessible entrance noted by organisers." },
-  { id: "sample-4", name: "Belgachia Metro", locality: "Belgachia", category: "Metro", distance: "0.8 km", color: "#26734D", x: 42, y: 68, facilities: ["Metro", "Auto stand"], description: "Nearest transit connection." },
-  { id: "sample-5", name: "Public Drinking Water", locality: "Lake Town", category: "Food", distance: "0.4 km", color: "#F5BD32", x: 77, y: 50, facilities: ["Drinking water"], description: "Public drinking-water point." },
-  { id: "sample-6", name: "Public Convenience", locality: "Hatibagan", category: "Toilet", distance: "1.1 km", color: "#5D75A6", x: 35, y: 25, facilities: ["Accessible toilet"], description: "Public facility, hours pending verification." },
+const civicUtilities: Place[] = [
+  { id: "metro-1", name: "Belgachia Metro Station", locality: "Belgachia", category: "Metro", distance: "Transit Hub", color: "#26734D", x: 42, y: 68, latitude: 22.6062, longitude: 88.3846, facilities: ["Metro", "Auto stand"], description: "Nearest transit connection for North Kolkata pandals." },
+  { id: "metro-2", name: "Shyambazar Metro Station", locality: "Shyambazar", category: "Metro", distance: "North Kolkata Junction", color: "#26734D", x: 40, y: 60, latitude: 22.6027, longitude: 88.3712, facilities: ["Metro", "Bus terminus"], description: "Key junction connecting Central and North Kolkata." },
+  { id: "civic-1", name: "Public Drinking Water Point", locality: "Lake Town Connector", category: "Food", distance: "Drinking Water", color: "#F5BD32", x: 77, y: 50, latitude: 22.6015, longitude: 88.4012, facilities: ["Drinking water", "Purified water"], description: "Free civic drinking water facility." },
+  { id: "civic-2", name: "Public Convenience & Restroom", locality: "VIP Road", category: "Toilet", distance: "Restroom", color: "#5D75A6", x: 35, y: 25, latitude: 22.6045, longitude: 88.4110, facilities: ["Accessible toilet"], description: "Civic sanitation point maintained for festival visitors." },
 ];
-
-const fallbackPandal = (place: Place): Pandal => ({ id: place.id, name: place.name, address: place.locality, locality: place.locality, latitude: 22.5726 + (place.y - 50) / 300, longitude: 88.3639 + (place.x - 50) / 300, status: "published", createdBy: "sample" });
 
 const placeFromPandal = (pandal: Pandal): Place => ({
   id: pandal.id,
@@ -114,24 +111,56 @@ export default function Home() {
 
   const allPlaces = useMemo<Place[]>(() => {
     if (livePlaces.length > 0) {
-      const nonPandalUtilities = samplePlaces.filter((p) => p.category !== "Pandal");
-      return [...livePlaces, ...nonPandalUtilities];
+      return [...livePlaces, ...civicUtilities];
     }
-    return samplePlaces;
+    return civicUtilities;
   }, [livePlaces]);
 
-  const [selected, setSelected] = useState<Place>(samplePlaces[0]);
+  const [selected, setSelected] = useState<Place | null>(null);
+  const [userGroups, setUserGroups] = useState<PujaGroup[]>([]);
+  const [liveCoords, setLiveCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    setUserGroups(getStoredGroups());
+  }, [active]);
+
+  const activeGroup = userGroups.length > 0 ? userGroups[0] : null;
 
   useEffect(() => {
     if (livePlaces.length > 0) {
       setSelected((prev) => {
-        if (!livePlaces.some((p) => p.id === prev.id)) {
+        if (!prev || !livePlaces.some((p) => p.id === prev.id)) {
           return livePlaces[0];
         }
         return prev;
       });
+    } else if (civicUtilities.length > 0) {
+      setSelected((prev) => prev || civicUtilities[0]);
     }
   }, [livePlaces]);
+
+  const toggleLiveSharing = () => {
+    if (!sharing) {
+      if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            setLiveCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            setSharing(true);
+          },
+          () => {
+            setLiveCoords({ lat: 22.5726, lng: 88.3639 });
+            setSharing(true);
+          }
+        );
+      } else {
+        setLiveCoords({ lat: 22.5726, lng: 88.3639 });
+        setSharing(true);
+      }
+    } else {
+      setSharing(false);
+      setLiveCoords(null);
+    }
+  };
 
   const userInitials = useMemo(() => {
     if (!user) return "AM";
@@ -165,8 +194,8 @@ export default function Home() {
         </div>
         <div className={styles.mapCard}>
           <PujaMap
-            pandals={livePandals.length > 0 ? livePandals : visible.map(fallbackPandal)}
-            selectedId={selected.id}
+            pandals={livePandals}
+            selectedId={selected?.id}
             onSelect={(pandal) => {
               const matched = allPlaces.find((p) => p.id === pandal.id);
               setSelected(matched || placeFromPandal(pandal));
@@ -175,30 +204,90 @@ export default function Home() {
           <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Published pandals ({livePandals.length})</span><span><i className={styles.greenDot}></i> Live updates</span></div>
           {mapDataError && <div className={styles.toast}>{mapDataError}<button onClick={() => setMapDataError("")}>Dismiss</button></div>}
         </div>
-        <article className={styles.placeCard}>
-          <div className={styles.placePhoto}><span>দুর্গা</span></div>
-          <div className={styles.placeInfo}><div className={styles.placeTop}><div><p className={styles.type}>{selected.category}</p><h2>{selected.name}</h2></div><button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button></div>
-          <p className={styles.muted}>{selected.locality} · {selected.distance}</p>{selected.rating && <p className={styles.rating}>★ {selected.rating} <span>({selected.reviews} reviews)</span></p>}
-          <div className={styles.actions}><button className={styles.secondary} onClick={() => addToRoute(selected)}>＋ Add to plan</button><button className={styles.primary} onClick={() => setActive("routes")}>Directions →</button></div></div>
-        </article>
-        <div className={styles.nearbyHeading}><div><p className={styles.kicker}>EXPLORE PUJOS</p><h2>Published Pandals</h2></div><button onClick={() => setFilter("Pandal")}>See all</button></div>
-        <div className={styles.nearby}>{allPlaces.filter((p) => p.category === "Pandal").map((p) => <button key={p.id} className={styles.nearbyCard} onClick={() => setSelected(p)}><div className={styles.tinyPhoto}>✦</div><strong>{p.name}</strong><span>★ {p.rating} · {p.locality}</span></button>)}</div>
+        {selected ? (
+          <article className={styles.placeCard}>
+            <div className={styles.placePhoto}><span>দুর্গা</span></div>
+            <div className={styles.placeInfo}>
+              <div className={styles.placeTop}>
+                <div><p className={styles.type}>{selected.category}</p><h2>{selected.name}</h2></div>
+                <button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button>
+              </div>
+              <p className={styles.muted}>{selected.locality} · {selected.distance}</p>
+              {selected.rating && <p className={styles.rating}>★ {selected.rating} <span>({selected.reviews} reviews)</span></p>}
+              <div className={styles.actions}>
+                <button className={styles.secondary} onClick={() => addToRoute(selected)}>＋ Add to plan</button>
+                <button className={styles.primary} onClick={() => setActive("routes")}>Directions →</button>
+              </div>
+            </div>
+          </article>
+        ) : (
+          <div className={styles.emptyNotice}>
+            <p>No published pandals found.</p>
+            <p className={styles.subtle}>Publish your first pandal in the Admin portal to view it on the map.</p>
+          </div>
+        )}
+        <div className={styles.nearbyHeading}>
+          <div><p className={styles.kicker}>EXPLORE PUJOS</p><h2>Published Pandals</h2></div>
+          <button onClick={() => setFilter("Pandal")}>See all</button>
+        </div>
+        <div className={styles.nearby}>
+          {allPlaces.filter((p) => p.category === "Pandal").length === 0 ? (
+            <p style={{ fontSize: "12px", color: "var(--muted)", padding: "10px 0" }}>No pandals published yet.</p>
+          ) : (
+            allPlaces.filter((p) => p.category === "Pandal").map((p) => (
+              <button key={p.id} className={styles.nearbyCard} onClick={() => setSelected(p)}>
+                <div className={styles.tinyPhoto}>✦</div>
+                <strong>{p.name}</strong>
+                <span>★ {p.rating} · {p.locality}</span>
+              </button>
+            ))
+          )}
+        </div>
       </>}
 
-      {active === "routes" && <section className={styles.screen}><p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p><h1>Your pujo <em>route</em></h1><p className={styles.intro}>Thursday, 23 October · 2 stops · 4.8 km</p>
-        <div className={styles.routeSummary}><span>🚶</span><div><strong>1 hr 18 min</strong><small>Walking estimate · routes need Google setup</small></div><button>⋮</button></div>
-        <div className={styles.timeline}>{route.map((p, index) => <div className={styles.stop} key={p.id}><i>{index + 1}</i><div><strong>{p.name}</strong><span>{p.locality}</span><small>{index === 0 ? "Start at 5:30 PM" : "Arrive about 6:10 PM"}</small></div><button onClick={() => setRoute((r) => r.filter((x) => x.id !== p.id))} aria-label={`Remove ${p.name}`}>×</button></div>)}</div>
-        <button className={styles.addStop} onClick={() => setActive("map")}>＋ Add another stop</button>
-        <div className={styles.weather}><span>☂</span><div><strong>Rain may arrive after 8 PM</strong><p>Forecast will appear once a weather provider is configured.</p></div></div>
-        <button className={styles.primaryWide} onClick={() => {
-          if (route.length === 0) {
-            alert("Please add at least one pandal stop to your route first.");
-            return;
-          }
-          const destination = encodeURIComponent(route[route.length - 1].name + ", " + (route[route.length - 1].locality || "Kolkata"));
-          const waypoints = route.slice(0, -1).map(r => encodeURIComponent(r.name + ", " + (r.locality || "Kolkata"))).join("|");
-          window.open(`https://www.google.com/maps/dir/?api=1&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}`, "_blank");
-        }}>Open in Google Maps ↗</button>
+      {active === "routes" && <section className={styles.screen}>
+        <p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p>
+        <h1>Your pujo <em>route</em></h1>
+        {route.length === 0 ? (
+          <div className={styles.emptyNotice}>
+            <p>Your itinerary is currently empty.</p>
+            <p className={styles.subtle}>Browse published pandals on the map and tap &apos;＋ Add to plan&apos; to build your route.</p>
+            <button className={styles.primary} style={{ marginTop: "10px" }} onClick={() => setActive("map")}>
+              Browse Pandals on Map →
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className={styles.intro}>{route.length} planned stop{route.length === 1 ? "" : "s"} · ~{route.length * 35} mins visit estimate</p>
+            <div className={styles.routeSummary}>
+              <span>🚶</span>
+              <div>
+                <strong>{route.length} Pandal Stops Planned</strong>
+                <small>Turn-by-turn navigation available in Google Maps</small>
+              </div>
+              <button onClick={() => setRoute([])} title="Clear itinerary">Clear</button>
+            </div>
+            <div className={styles.timeline}>
+              {route.map((p, index) => (
+                <div className={styles.stop} key={p.id}>
+                  <i>{index + 1}</i>
+                  <div>
+                    <strong>{p.name}</strong>
+                    <span>{p.locality}</span>
+                    <small>Stop {index + 1} · {index === 0 ? "Starting point" : `~${index * 35} mins later`}</small>
+                  </div>
+                  <button onClick={() => setRoute((r) => r.filter((x) => x.id !== p.id))} aria-label={`Remove ${p.name}`}>×</button>
+                </div>
+              ))}
+            </div>
+            <button className={styles.addStop} onClick={() => setActive("map")}>＋ Add another stop from map</button>
+            <button className={styles.primaryWide} onClick={() => {
+              const destination = encodeURIComponent(route[route.length - 1].name + ", " + (route[route.length - 1].locality || "Kolkata"));
+              const waypoints = route.slice(0, -1).map(r => encodeURIComponent(r.name + ", " + (r.locality || "Kolkata"))).join("|");
+              window.open(`https://www.google.com/maps/dir/?api=1&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}`, "_blank");
+            }}>Open in Google Maps ↗</button>
+          </>
+        )}
       </section>}
 
       {active === "connect" && <section className={styles.screen}>
@@ -207,41 +296,56 @@ export default function Home() {
         <div className={styles.connectCard}>
           <span className={styles.bigIcon}>⌖</span>
           <h2>Share live location</h2>
-          <p>Only people in your group can see your location, and only while you choose to share it.</p>
+          <p>Only people in your active group can see your location, and only while you choose to share it.</p>
           <button
             className={sharing ? styles.stopShare : styles.primaryWide}
-            onClick={() => {
-              if (!sharing) {
-                if ("geolocation" in navigator) {
-                  navigator.geolocation.getCurrentPosition(
-                    () => setSharing(true),
-                    () => setSharing(true)
-                  );
-                } else {
-                  setSharing(true);
-                }
-              } else {
-                setSharing(false);
-              }
-            }}
+            onClick={toggleLiveSharing}
           >
             {sharing ? "Stop sharing" : "Start sharing"}
           </button>
-          {sharing && <small className={styles.live}>● Live location sharing active — visible to your Pujo 2026 group members.</small>}
+          {sharing && (
+            <small className={styles.live}>
+              ● Live location sharing active {liveCoords ? `(${liveCoords.lat.toFixed(4)}, ${liveCoords.lng.toFixed(4)})` : ""} — visible to your {activeGroup ? activeGroup.name : "active group"} members.
+            </small>
+          )}
         </div>
-        <h2 className={styles.sectionTitle}>With your group</h2>
-        <div className={styles.member}>
-          <span>RS</span>
-          <div>
-            <strong>Riya Sen</strong>
-            <small>Active 4 min ago · Lake Town</small>
+        <h2 className={styles.sectionTitle}>
+          {activeGroup ? `With your group: ${activeGroup.name}` : "With your group"}
+        </h2>
+        {activeGroup && activeGroup.members.filter((m) => m.id !== (user?.uid || "usr-self") && m.name !== (user?.displayName || "You")).length > 0 ? (
+          activeGroup.members
+            .filter((m) => m.id !== (user?.uid || "usr-self") && m.name !== (user?.displayName || "You"))
+            .map((m) => (
+              <div className={styles.member} key={m.id}>
+                <span>{m.initials}</span>
+                <div>
+                  <strong>{m.name}</strong>
+                  <small>{m.lastActive ? `Active ${m.lastActive}` : "Group member"}</small>
+                </div>
+                <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`Hey ${m.name}! Where are you at for Pujo hopping?`)}`, "_blank")}>
+                  Message
+                </button>
+              </div>
+            ))
+        ) : activeGroup ? (
+          <div className={styles.emptyNotice}>
+            <p>You are the organizer in <strong>{activeGroup.name}</strong> (Code: <code>{activeGroup.inviteCode}</code>).</p>
+            <p className={styles.subtle}>No other members have joined yet. Share your group invite link or QR code to see their location here!</p>
+            <button className={styles.secondary} style={{ width: "100%" }} onClick={() => setActive("groups")}>
+              Invite friends with QR / Link →
+            </button>
           </div>
-          <button onClick={() => window.open("https://wa.me/?text=" + encodeURIComponent("Hey! Where are you at for Pujo hopping?"), "_blank")}>
-            Message
-          </button>
-        </div>
-        <button className={styles.secondary} style={{ width: "100%", marginTop: "10px" }} onClick={() => setActive("groups")}>
-          Manage Groups & Members →
+        ) : (
+          <div className={styles.emptyNotice}>
+            <p>You haven&apos;t created or joined a group yet.</p>
+            <p className={styles.subtle}>Create a group with your friends to coordinate pandal hopping and stay in sync in real time.</p>
+            <button className={styles.primary} style={{ width: "100%" }} onClick={() => setActive("groups")}>
+              Create or Join a Group →
+            </button>
+          </div>
+        )}
+        <button className={styles.secondary} style={{ width: "100%", marginTop: "12px" }} onClick={() => setActive("groups")}>
+          Manage Groups & Itineraries →
         </button>
       </section>}
 

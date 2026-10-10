@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
 export type GroupMember = {
@@ -29,41 +29,21 @@ export type PujaGroup = {
   createdAt: number;
 };
 
-const STORAGE_KEY = "puja26_user_groups_v1";
-
-export const initialSampleGroups: PujaGroup[] = [
-  {
-    id: "group-pujo2026",
-    name: "Pujo 2026",
-    tagline: "Tonight · 2 planned stops",
-    date: "Thursday, 23 October",
-    inviteCode: "PUJA26-KOL78",
-    members: [
-      { id: "m-1", name: "You", role: "organizer", initials: "ME", lastActive: "Just now" },
-      { id: "m-2", name: "Riya Sen", role: "member", initials: "RS", lastActive: "4 min ago" },
-      { id: "m-3", name: "Anirban Das", role: "member", initials: "AD", lastActive: "12 min ago" },
-      { id: "m-4", name: "Poulomi Roy", role: "member", initials: "PR", lastActive: "1 hr ago" },
-    ],
-    stops: [
-      { id: "sample-stop-1", name: "Dum Dum Park Sarbojanin Durga Puja Samity", locality: "Dum Dum Park", latitude: 22.6094363, longitude: 88.4164052 },
-      { id: "sample-stop-2", name: "Tala Prattoy Durga Puja Art", locality: "Kolkata", latitude: 22.6087911, longitude: 88.382502 },
-    ],
-    createdAt: 1729000000000,
-  },
-];
+const STORAGE_KEY = "puja26_user_groups_v2";
 
 export function getStoredGroups(): PujaGroup[] {
-  if (typeof window === "undefined") return initialSampleGroups;
+  if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialSampleGroups));
-      return initialSampleGroups;
+    // Clean up old demo key if it exists
+    if (localStorage.getItem("puja26_user_groups_v1")) {
+      localStorage.removeItem("puja26_user_groups_v1");
     }
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : initialSampleGroups;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return initialSampleGroups;
+    return [];
   }
 }
 

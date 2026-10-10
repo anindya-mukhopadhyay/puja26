@@ -138,27 +138,22 @@ export default function GroupsManager({ publishedPandals, user, onViewRoute, onN
       return;
     }
 
-    // If joining a new group by code
-    const currentUserName = user?.displayName || user?.email?.split("@")[0] || "Explorer";
+    const currentUserName = user?.displayName || user?.email?.split("@")[0] || "You";
+    const userInitials = (
+      (user?.displayName?.split(" ") || []).map((n) => n[0]).join("") ||
+      (currentUserName.slice(0, 2) || "ME")
+    ).toUpperCase();
+
     const joinedGroup: PujaGroup = {
       id: `group-joined-${Date.now()}`,
-      name: `Joined Plan (${cleanCode})`,
-      tagline: "Tonight · 1 planned stop",
+      name: `Pujo Group (${cleanCode})`,
+      tagline: "Active Plan",
       date: "Tonight",
       inviteCode: cleanCode,
       members: [
-        { id: `org-${Date.now()}`, name: "Group Organizer", role: "organizer", initials: "GO", lastActive: "15 min ago" },
-        { id: user?.uid || `mem-${Date.now()}`, name: currentUserName, role: "member", initials: "ME", lastActive: "Just now" },
+        { id: user?.uid || `mem-${Date.now()}`, name: currentUserName, role: "member", initials: userInitials, lastActive: "Just now" },
       ],
-      stops: [
-        {
-          id: "pandal-1",
-          name: publishedPandals[0]?.name || "Dum Dum Park Sarbojanin Durga Puja Samity",
-          locality: publishedPandals[0]?.locality || "Dum Dum Park",
-          latitude: publishedPandals[0]?.latitude,
-          longitude: publishedPandals[0]?.longitude,
-        },
-      ],
+      stops: [],
       createdAt: Date.now(),
     };
 
@@ -485,28 +480,39 @@ export default function GroupsManager({ publishedPandals, user, onViewRoute, onN
       </div>
 
       <div className={styles.groupList}>
-        {groups.map((group) => (
-          <article
-            className={styles.groupCard}
-            key={group.id}
-            onClick={() => handleSelectGroup(group)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") handleSelectGroup(group);
-            }}
-          >
-            <div className={styles.groupArt}>✦</div>
-            <div className={styles.groupInfo}>
-              <span className={styles.groupBadge}>
-                {group.members.length} MEMBER{group.members.length === 1 ? "" : "S"}
-              </span>
-              <h2 className={styles.groupName}>{group.name}</h2>
-              <p className={styles.groupMeta}>{group.tagline || `${group.date} · ${group.stops.length} stops`}</p>
-            </div>
-            <span className={styles.arrowIcon}>›</span>
-          </article>
-        ))}
+        {groups.length === 0 ? (
+          <div className={styles.emptyCard}>
+            <div className={styles.emptyMotif}>✦</div>
+            <h3>No groups created yet</h3>
+            <p>Create a group with your hopping crew or join with a friend&apos;s invite code to plan routes and stay in sync.</p>
+            <button className={styles.primaryPill} onClick={() => setShowCreateModal(true)}>
+              ＋ Create your first group
+            </button>
+          </div>
+        ) : (
+          groups.map((group) => (
+            <article
+              className={styles.groupCard}
+              key={group.id}
+              onClick={() => handleSelectGroup(group)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") handleSelectGroup(group);
+              }}
+            >
+              <div className={styles.groupArt}>✦</div>
+              <div className={styles.groupInfo}>
+                <span className={styles.groupBadge}>
+                  {group.members.length} MEMBER{group.members.length === 1 ? "" : "S"}
+                </span>
+                <h2 className={styles.groupName}>{group.name}</h2>
+                <p className={styles.groupMeta}>{group.tagline || `${group.date} · ${group.stops.length} stops`}</p>
+              </div>
+              <span className={styles.arrowIcon}>›</span>
+            </article>
+          ))
+        )}
       </div>
 
       {/* Invite Friends Banner */}
