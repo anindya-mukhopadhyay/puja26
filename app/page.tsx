@@ -64,6 +64,29 @@ const placeFromPandal = (pandal: Pandal): Place => ({
   description: pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Published by a verified Puja26 administrator.")
 });
 
+const ROUTE_STORAGE_KEY = "puja26_user_route_v1";
+
+function getStoredRoute(): Place[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(ROUTE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredRoute(places: Place[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify(places));
+  } catch (err) {
+    console.error("Failed to save route to localStorage:", err);
+  }
+}
+
 const nav = [
   ["map", "⌖", "Map"], ["routes", "⌁", "Routes"], ["connect", "◎", "Connect"], ["groups", "♧", "Groups"], ["profile", "◉", "Profile"],
 ] as const;
@@ -82,6 +105,7 @@ export default function Home() {
   const [locating, setLocating] = useState(false);
   const [locationNotice, setLocationNotice] = useState("");
   const [route, setRoute] = useState<Place[]>([]);
+  const [routeToast, setRouteToast] = useState<{ message: string; placeName: string } | null>(null);
   const [sharing, setSharing] = useState(false);
   const [livePandals, setLivePandals] = useState<Pandal[]>([]);
   const [mapDataError, setMapDataError] = useState("");
@@ -89,7 +113,14 @@ export default function Home() {
 
   useEffect(() => {
     setVisited(getStoredVisited());
+    setRoute(getStoredRoute());
   }, []);
+
+  useEffect(() => {
+    if (!routeToast) return;
+    const t = setTimeout(() => setRouteToast(null), 4500);
+    return () => clearTimeout(t);
+  }, [routeToast]);
 
   useEffect(() => {
     if (!auth) return;
@@ -294,7 +325,36 @@ export default function Home() {
   }, [livePlaces, filter, visited]);
 
   const toggleSaved = (id: string) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
-  const addToRoute = (place: Place) => setRoute((old) => old.some((p) => p.id === place.id) ? old : [...old, place]);
+
+  const toggleRoute = (place: Place) => {
+    setRoute((prev) => {
+      const exists = prev.some((p) => p.id === place.id);
+      let updated: Place[];
+      if (exists) {
+        updated = prev.filter((p) => p.id !== place.id);
+        setRouteToast({
+          placeName: place.name,
+          message: `Removed from route`,
+        });
+      } else {
+        updated = [...prev, place];
+        setRouteToast({
+          placeName: place.name,
+          message: `Added as Stop #${updated.length} in your route!`,
+        });
+      }
+      saveStoredRoute(updated);
+      return updated;
+    });
+  };
+
+  const openPandalDirections = (place: Place) => {
+    const dest =
+      Number.isFinite(place.latitude) && Number.isFinite(place.longitude)
+        ? `${place.latitude},${place.longitude}`
+        : encodeURIComponent(`${place.name}, ${place.locality || "Kolkata"}`);
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, "_blank");
+  };
 
   return <main className={styles.app}>
     <section className={styles.shell}>
@@ -370,6 +430,14 @@ export default function Home() {
                     {visited.includes(selected.id) && (
                       <span className={styles.visitedBadge}>✓ Visited</span>
                     )}
+                    {route.some((p) => p.id === selected.id) && (
+                      <span
+                        className={styles.visitedBadge}
+                        style={{ background: "#FFF3E0", color: "#E65100", borderColor: "#FFE0B2" }}
+                      >
+                        Stop #{route.findIndex((p) => p.id === selected.id) + 1}
+                      </span>
+                    )}
                   </div>
                   <h2>{selected.name}</h2>
                 </div>
@@ -387,15 +455,49 @@ export default function Home() {
                 >
                   {visited.includes(selected.id) ? "✓ Visited" : "✓ Mark as Visited"}
                 </button>
-                <button className={styles.secondary} onClick={() => addToRoute(selected)}>＋ Add to plan</button>
-                <button className={styles.primary} onClick={() => setActive("routes")}>Directions →</button>
+                <button
+                  className={route.some((p) => p.id === selected.id) ? styles.routeInBtn : styles.routeAddBtn}
+                  onClick={() => toggleRoute(selected)}
+                  title={route.some((p) => p.id === selected.id) ? "Currently in route itinerary. Click to remove" : "Add pandal to your route itinerary"}
+                >
+                  {route.some((p) => p.id === selected.id)
+                    ? `✓ In Route (#${route.findIndex((p) => p.id === selected.id) + 1})`
+                    : "＋ Add to Route"}
+                </button>
+                <button
+                  className={styles.primary}
+                  onClick={() => openPandalDirections(selected)}
+                  title="Open direct turn-by-turn navigation in Google Maps"
+                >
+                  Directions ↗
+                </button>
               </div>
+              {route.length > 0 && (
+                <div className={styles.routeCardHint}>
+                  <span>🚶 <strong>{route.length} pandal{route.length === 1 ? "" : "s"}</strong> planned in your itinerary</span>
+                  <button onClick={() => setActive("routes")}>View Itinerary →</button>
+                </div>
+              )}
             </div>
           </article>
         ) : (
           <div className={styles.emptyNotice}>
             <p>No published pandals found.</p>
             <p className={styles.subtle}>Publish your first pandal in the Admin portal to view it on the map.</p>
+          </div>
+        )}
+        {route.length > 0 && (
+          <div className={styles.routeFloatBar}>
+            <div className={styles.routeFloatInfo}>
+              <span className={styles.routeFloatIcon}>🚶</span>
+              <div>
+                <strong>Your Route: {route.length} Pandal{route.length === 1 ? "" : "s"} Planned</strong>
+                <small>~{route.length * 35} mins estimated visit time · Tap to view full itinerary</small>
+              </div>
+            </div>
+            <button className={styles.routeFloatBtn} onClick={() => setActive("routes")}>
+              View Route ({route.length}) →
+            </button>
           </div>
         )}
         <div className={styles.nearbyHeading}>
@@ -467,7 +569,16 @@ export default function Home() {
                 <strong>{route.length} Pandal Stops Planned</strong>
                 <small>Turn-by-turn navigation available in Google Maps</small>
               </div>
-              <button onClick={() => setRoute([])} title="Clear itinerary">Clear</button>
+              <button
+                onClick={() => {
+                  setRoute([]);
+                  saveStoredRoute([]);
+                  setRouteToast({ placeName: "Itinerary", message: "Cleared all stops from route" });
+                }}
+                title="Clear itinerary"
+              >
+                Clear
+              </button>
             </div>
             <div className={styles.timeline}>
               {route.map((p, index) => (
@@ -482,7 +593,19 @@ export default function Home() {
                     <span>{p.locality}</span>
                     <small>Stop {index + 1} · {index === 0 ? "Starting point" : `~${index * 35} mins later`}</small>
                   </div>
-                  <button onClick={() => setRoute((r) => r.filter((x) => x.id !== p.id))} aria-label={`Remove ${p.name}`}>×</button>
+                  <button
+                    onClick={() => {
+                      setRoute((r) => {
+                        const next = r.filter((x) => x.id !== p.id);
+                        saveStoredRoute(next);
+                        return next;
+                      });
+                      setRouteToast({ placeName: p.name, message: "Removed from route" });
+                    }}
+                    aria-label={`Remove ${p.name}`}
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>
@@ -600,7 +723,50 @@ export default function Home() {
         </div>
       </section>}
 
-      <nav className={styles.nav} aria-label="Main navigation">{nav.map(([id, glyph, label]) => <button key={id} onClick={() => setActive(id)} className={active === id ? styles.activeNav : ""}><Icon>{glyph}</Icon><span>{label}</span></button>)}</nav>
+      {routeToast && (
+        <div className={styles.routeToast} role="status">
+          <div>
+            <strong>{routeToast.placeName}</strong>
+            <span>: {routeToast.message}</span>
+          </div>
+          <div className={styles.routeToastActions}>
+            <button
+              className={styles.routeToastViewBtn}
+              onClick={() => {
+                setActive("routes");
+                setRouteToast(null);
+              }}
+            >
+              View Route ({route.length}) →
+            </button>
+            <button
+              className={styles.routeToastCloseBtn}
+              onClick={() => setRouteToast(null)}
+              aria-label="Dismiss toast"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      <nav className={styles.nav} aria-label="Main navigation">
+        {nav.map(([id, glyph, label]) => (
+          <button
+            key={id}
+            onClick={() => setActive(id)}
+            className={`${active === id ? styles.activeNav : ""} ${styles.navBtn}`}
+          >
+            <div className={styles.navIconWrap}>
+              <Icon>{glyph}</Icon>
+              {id === "routes" && route.length > 0 && (
+                <span className={styles.navBadge}>{route.length}</span>
+              )}
+            </div>
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
     </section>
   </main>;
 }
