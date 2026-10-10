@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function isAdmin() { return signedIn() && (request.auth.token.admin == true || exists(/databases/$(database)/documents/admins/$(request.auth.uid))); }
     function isSelf(userId) { return signedIn() && request.auth.uid == userId; }
     function groupMember(groupId) { return signedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)); }
     function validCoordinates(data) { return data.latitude is number && data.longitude is number && data.latitude >= -90 && data.latitude <= 90 && data.longitude >= -180 && data.longitude <= 180 && data.location is latlng; }
@@ -13,6 +13,12 @@ service cloud.firestore {
       allow create: if isAdmin() && request.resource.data.createdBy == request.auth.uid && validPandal(request.resource.data);
       allow update: if isAdmin() && request.resource.data.createdBy == resource.data.createdBy && request.resource.data.createdAt == resource.data.createdAt && validPandal(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow read: if signedIn();
+      allow create: if isSelf(adminId) && request.resource.data.passcode == "PUJA26_SECRET_ADMIN_2026";
+      allow update, delete: if isAdmin();
     }
 
     match /locations/{locationId} {

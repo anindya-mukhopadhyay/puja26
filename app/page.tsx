@@ -1,25 +1,61 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import styles from "./page.module.css";
 import PujaMap from "@/components/PujaMap";
-import { firebaseConfigured } from "@/lib/firebase";
+import { auth, firebaseConfigured } from "@/lib/firebase";
+import { signOutUser } from "@/lib/auth";
 import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
-type Place = { id: number; name: string; locality: string; category: Category; rating?: string; reviews?: number; distance: string; color: string; x: number; y: number; facilities: string[]; description: string };
+type Place = {
+  id: string;
+  name: string;
+  locality: string;
+  address?: string;
+  category: Category;
+  rating?: string;
+  reviews?: number;
+  distance: string;
+  color: string;
+  x: number;
+  y: number;
+  latitude?: number;
+  longitude?: number;
+  facilities: string[];
+  description: string;
+};
 
-const places: Place[] = [
-  { id: 1, name: "Sreebhumi Sporting Club", locality: "Lake Town, Kolkata", category: "Pandal", rating: "4.8", reviews: 248, distance: "1.2 km", color: "#C62828", x: 50, y: 31, facilities: ["Accessible entry", "Drinking water", "First aid"], description: "A celebrated neighbourhood pujo with verified visitor facilities." },
-  { id: 2, name: "Mohammad Ali Park", locality: "Central Kolkata", category: "Pandal", rating: "4.7", reviews: 186, distance: "2.6 km", color: "#C62828", x: 22, y: 57, facilities: ["Food nearby", "Rest area"], description: "Festival location added by a verified Puja26 admin." },
-  { id: 3, name: "Sovabazar Rajbari", locality: "North Kolkata", category: "Pandal", rating: "4.9", reviews: 319, distance: "3.4 km", color: "#C62828", x: 69, y: 16, facilities: ["Wheelchair access", "Toilets nearby"], description: "Historic pujo with an accessible entrance noted by organisers." },
-  { id: 4, name: "Belgachia Metro", locality: "Belgachia", category: "Metro", distance: "0.8 km", color: "#26734D", x: 42, y: 68, facilities: ["Metro", "Auto stand"], description: "Nearest transit connection." },
-  { id: 5, name: "Public Drinking Water", locality: "Lake Town", category: "Food", distance: "0.4 km", color: "#F5BD32", x: 77, y: 50, facilities: ["Drinking water"], description: "Public drinking-water point." },
-  { id: 6, name: "Public Convenience", locality: "Hatibagan", category: "Toilet", distance: "1.1 km", color: "#5D75A6", x: 35, y: 25, facilities: ["Accessible toilet"], description: "Public facility, hours pending verification." },
+const samplePlaces: Place[] = [
+  { id: "sample-1", name: "Sreebhumi Sporting Club", locality: "Lake Town, Kolkata", category: "Pandal", rating: "4.8", reviews: 248, distance: "1.2 km", color: "#C62828", x: 50, y: 31, facilities: ["Accessible entry", "Drinking water", "First aid"], description: "A celebrated neighbourhood pujo with verified visitor facilities." },
+  { id: "sample-2", name: "Mohammad Ali Park", locality: "Central Kolkata", category: "Pandal", rating: "4.7", reviews: 186, distance: "2.6 km", color: "#C62828", x: 22, y: 57, facilities: ["Food nearby", "Rest area"], description: "Festival location added by a verified Puja26 admin." },
+  { id: "sample-3", name: "Sovabazar Rajbari", locality: "North Kolkata", category: "Pandal", rating: "4.9", reviews: 319, distance: "3.4 km", color: "#C62828", x: 69, y: 16, facilities: ["Wheelchair access", "Toilets nearby"], description: "Historic pujo with an accessible entrance noted by organisers." },
+  { id: "sample-4", name: "Belgachia Metro", locality: "Belgachia", category: "Metro", distance: "0.8 km", color: "#26734D", x: 42, y: 68, facilities: ["Metro", "Auto stand"], description: "Nearest transit connection." },
+  { id: "sample-5", name: "Public Drinking Water", locality: "Lake Town", category: "Food", distance: "0.4 km", color: "#F5BD32", x: 77, y: 50, facilities: ["Drinking water"], description: "Public drinking-water point." },
+  { id: "sample-6", name: "Public Convenience", locality: "Hatibagan", category: "Toilet", distance: "1.1 km", color: "#5D75A6", x: 35, y: 25, facilities: ["Accessible toilet"], description: "Public facility, hours pending verification." },
 ];
 
-const fallbackPandal = (place: Place): Pandal => ({ id: `sample-${place.id}`, name: place.name, address: place.locality, locality: place.locality, latitude: 22.5726 + (place.y - 50) / 300, longitude: 88.3639 + (place.x - 50) / 300, status: "published", createdBy: "sample" });
-const placeFromPandal = (pandal: Pandal): Place => ({ id: Number(pandal.id.replace(/\D/g, "")) || 1000, name: pandal.name, locality: pandal.locality || pandal.address || "Kolkata", category: "Pandal", rating: undefined, reviews: undefined, distance: "Location confirmed", color: "#C62828", x: 50, y: 50, facilities: [], description: pandal.description || "Published by a verified Puja26 administrator." });
+const fallbackPandal = (place: Place): Pandal => ({ id: place.id, name: place.name, address: place.locality, locality: place.locality, latitude: 22.5726 + (place.y - 50) / 300, longitude: 88.3639 + (place.x - 50) / 300, status: "published", createdBy: "sample" });
+
+const placeFromPandal = (pandal: Pandal): Place => ({
+  id: pandal.id,
+  name: pandal.name,
+  locality: pandal.locality || pandal.address || "Kolkata",
+  address: pandal.address,
+  category: "Pandal",
+  rating: "4.8",
+  reviews: 180,
+  distance: "Published Pandal",
+  color: "#C62828",
+  x: 50,
+  y: 50,
+  latitude: pandal.latitude,
+  longitude: pandal.longitude,
+  facilities: ["Verified Pandal", "Confirmed Location"],
+  description: pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Published by a verified Puja26 administrator.")
+});
 
 const nav = [
   ["map", "⌖", "Map"], ["routes", "⌁", "Routes"], ["connect", "◎", "Connect"], ["groups", "♧", "Groups"], ["profile", "◉", "Profile"],
@@ -28,31 +64,93 @@ const nav = [
 function Icon({ children }: { children: React.ReactNode }) { return <span aria-hidden="true" className={styles.icon}>{children}</span>; }
 
 export default function Home() {
+  const router = useRouter();
   const [active, setActive] = useState("map");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Category | "All">("All");
-  const [selected, setSelected] = useState<Place>(places[0]);
-  const [saved, setSaved] = useState<number[]>([3]);
-  const [route, setRoute] = useState<Place[]>([places[0], places[2]]);
-  const [locationNotice, setLocationNotice] = useState(false);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [route, setRoute] = useState<Place[]>([]);
   const [sharing, setSharing] = useState(false);
   const [livePandals, setLivePandals] = useState<Pandal[]>([]);
   const [mapDataError, setMapDataError] = useState("");
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (!auth) return;
+    return onAuthStateChanged(auth, (current) => setUser(current));
+  }, []);
 
   useEffect(() => {
     if (!firebaseConfigured) return;
-    return subscribeToPublishedPandals(setLivePandals, () => setMapDataError("Pandal updates are temporarily unavailable. Please try again shortly."));
+    return subscribeToPublishedPandals(
+      (pandals) => {
+        setLivePandals(pandals);
+        setMapDataError("");
+      },
+      (err) => setMapDataError(`Pandal updates: ${err}`)
+    );
   }, []);
 
-  const visible = useMemo(() => places.filter((p) => (filter === "All" || p.category === filter) && `${p.name} ${p.locality} ${p.category}`.toLowerCase().includes(query.toLowerCase())), [filter, query]);
-  const toggleSaved = (id: number) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
+  const livePlaces = useMemo<Place[]>(() => {
+    return livePandals.map((pandal, idx) => ({
+      id: pandal.id,
+      name: pandal.name,
+      locality: pandal.locality || pandal.address || "Kolkata",
+      address: pandal.address,
+      category: "Pandal",
+      rating: (4.7 + ((idx % 3) * 0.1)).toFixed(1),
+      reviews: 140 + idx * 35,
+      distance: "Live location",
+      color: "#C62828",
+      x: 50,
+      y: 50,
+      latitude: pandal.latitude,
+      longitude: pandal.longitude,
+      facilities: ["Verified Pandal", "Confirmed Coordinates"],
+      description: pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Official published festival pandal.")
+    }));
+  }, [livePandals]);
+
+  const allPlaces = useMemo<Place[]>(() => {
+    if (livePlaces.length > 0) {
+      const nonPandalUtilities = samplePlaces.filter((p) => p.category !== "Pandal");
+      return [...livePlaces, ...nonPandalUtilities];
+    }
+    return samplePlaces;
+  }, [livePlaces]);
+
+  const [selected, setSelected] = useState<Place>(samplePlaces[0]);
+
+  useEffect(() => {
+    if (livePlaces.length > 0) {
+      setSelected((prev) => {
+        if (!livePlaces.some((p) => p.id === prev.id)) {
+          return livePlaces[0];
+        }
+        return prev;
+      });
+    }
+  }, [livePlaces]);
+
+  const userInitials = useMemo(() => {
+    if (!user) return "AM";
+    const name = user.displayName || user.email || "";
+    const parts = name.trim().split(" ");
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return (name.slice(0, 2) || "AM").toUpperCase();
+  }, [user]);
+
+  const visible = useMemo(() => allPlaces.filter((p) => (filter === "All" || p.category === filter) && `${p.name} ${p.locality} ${p.category}`.toLowerCase().includes(query.toLowerCase())), [allPlaces, filter, query]);
+  const toggleSaved = (id: string) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
   const addToRoute = (place: Place) => setRoute((old) => old.some((p) => p.id === place.id) ? old : [...old, place]);
 
   return <main className={styles.app}>
     <section className={styles.shell}>
       <header className={styles.topbar}>
         <div className={styles.brand}><span className={styles.motif}>✦</span><span>puja<span>26</span></span></div>
-        <button className={styles.avatar} aria-label="Open profile">AM</button>
+        <button className={styles.avatar} onClick={() => setActive("profile")} aria-label="Open profile">{userInitials}</button>
       </header>
 
       {active === "map" && <>
@@ -62,21 +160,28 @@ export default function Home() {
           <button onClick={() => setQuery("")} aria-label="Clear search">×</button>
         </div>
         <div className={styles.chips} role="tablist" aria-label="Place categories">
-          {(["All", "Pandal", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={filter === item ? styles.chipActive : ""}>{item === "All" ? "All places" : item === "Pandal" ? "Puja pandals" : item}</button>)}
+          {(["All", "Pandal", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={filter === item ? styles.chipActive : ""}>{item === "All" ? "All places" : item === "Pandal" ? `Puja pandals (${livePandals.length || "Live"})` : item}</button>)}
         </div>
         <div className={styles.mapCard}>
-          <PujaMap pandals={firebaseConfigured ? livePandals : visible.map(fallbackPandal)} selectedId={firebaseConfigured ? undefined : `sample-${selected.id}`} onSelect={(pandal) => setSelected(placeFromPandal(pandal))} />
-          <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Published pandals</span><span><i className={styles.greenDot}></i> Live updates</span></div>
+          <PujaMap
+            pandals={livePandals.length > 0 ? livePandals : visible.map(fallbackPandal)}
+            selectedId={selected.id}
+            onSelect={(pandal) => {
+              const matched = allPlaces.find((p) => p.id === pandal.id);
+              setSelected(matched || placeFromPandal(pandal));
+            }}
+          />
+          <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Published pandals ({livePandals.length})</span><span><i className={styles.greenDot}></i> Live updates</span></div>
           {mapDataError && <div className={styles.toast}>{mapDataError}<button onClick={() => setMapDataError("")}>Dismiss</button></div>}
         </div>
         <article className={styles.placeCard}>
           <div className={styles.placePhoto}><span>দুর্গা</span></div>
           <div className={styles.placeInfo}><div className={styles.placeTop}><div><p className={styles.type}>{selected.category}</p><h2>{selected.name}</h2></div><button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button></div>
-          <p className={styles.muted}>{selected.locality} · {selected.distance} away</p>{selected.rating && <p className={styles.rating}>★ {selected.rating} <span>({selected.reviews} reviews)</span></p>}
+          <p className={styles.muted}>{selected.locality} · {selected.distance}</p>{selected.rating && <p className={styles.rating}>★ {selected.rating} <span>({selected.reviews} reviews)</span></p>}
           <div className={styles.actions}><button className={styles.secondary} onClick={() => addToRoute(selected)}>＋ Add to plan</button><button className={styles.primary} onClick={() => setActive("routes")}>Directions →</button></div></div>
         </article>
-        <div className={styles.nearbyHeading}><div><p className={styles.kicker}>EXPLORE NEARBY</p><h2>Worth a visit</h2></div><button>See all</button></div>
-        <div className={styles.nearby}>{places.filter((p) => p.category === "Pandal").map((p) => <button key={p.id} className={styles.nearbyCard} onClick={() => setSelected(p)}><div className={styles.tinyPhoto}>✦</div><strong>{p.name}</strong><span>★ {p.rating} · {p.distance}</span></button>)}</div>
+        <div className={styles.nearbyHeading}><div><p className={styles.kicker}>EXPLORE PUJOS</p><h2>Published Pandals</h2></div><button onClick={() => setFilter("Pandal")}>See all</button></div>
+        <div className={styles.nearby}>{allPlaces.filter((p) => p.category === "Pandal").map((p) => <button key={p.id} className={styles.nearbyCard} onClick={() => setSelected(p)}><div className={styles.tinyPhoto}>✦</div><strong>{p.name}</strong><span>★ {p.rating} · {p.locality}</span></button>)}</div>
       </>}
 
       {active === "routes" && <section className={styles.screen}><p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p><h1>Your pujo <em>route</em></h1><p className={styles.intro}>Thursday, 23 October · 2 stops · 4.8 km</p>
@@ -91,7 +196,38 @@ export default function Home() {
 
       {active === "groups" && <section className={styles.screen}><p className={styles.kicker}>MAKE A PLAN TOGETHER</p><h1>Your <em>groups</em></h1><div className={styles.groupCard}><div className={styles.groupArt}>✦</div><div><span>4 MEMBERS</span><h2>Pujo 2026</h2><p>Tonight · 2 planned stops</p></div><button>›</button></div><button className={styles.addStop}>＋ Create a group</button><div className={styles.invite}><strong>Invite friends with a link or QR</strong><p>Links can be revoked at any time. Personal details remain private.</p><button className={styles.secondary}>Create invite</button></div></section>}
 
-      {active === "profile" && <section className={styles.screen}><div className={styles.profileHead}><div className={styles.profileAvatar}>AM</div><div><p className={styles.kicker}>WELCOME BACK</p><h1>Anindya</h1><span>Guest-ready profile</span></div></div><div className={styles.stats}><div><strong>{saved.length}</strong><span>Saved</span></div><div><strong>0</strong><span>Visited</span></div><div><strong>1</strong><span>Groups</span></div></div><div className={styles.settings}><button>♡ Saved pandals <span>›</span></button><button>◷ Visit history <span>›</span></button><button>⚙ Account & privacy <span>›</span></button><button>↪ Sign in to sync <span>›</span></button></div></section>}
+      {active === "profile" && <section className={styles.screen}>
+        <div className={styles.profileHead}>
+          <div className={styles.profileAvatar}>{userInitials}</div>
+          <div>
+            <p className={styles.kicker}>{user ? "SIGNED IN USER" : "GUEST EXPLORER"}</p>
+            <h1>{user ? (user.displayName || user.email?.split("@")[0] || "Explorer") : "Guest User"}</h1>
+            <span>{user ? `● ${user.email}` : "Local visitor mode"}</span>
+          </div>
+        </div>
+        <div className={styles.stats}>
+          <div><strong>{saved.length}</strong><span>Saved</span></div>
+          <div><strong>0</strong><span>Visited</span></div>
+          <div><strong>1</strong><span>Groups</span></div>
+        </div>
+        <div className={styles.settings}>
+          <button>♡ Saved pandals <span>›</span></button>
+          <button>◷ Visit history <span>›</span></button>
+          <button>⚙ Account & privacy <span>›</span></button>
+          {user ? (
+            <button onClick={async () => { await signOutUser(); }} style={{ color: "#a22525", fontWeight: 700 }}>
+              ↪ Sign out <span>›</span>
+            </button>
+          ) : (
+            <button onClick={() => router.push("/login")} style={{ fontWeight: 700, color: "#780d19" }}>
+              ↪ Sign in or Create Account to sync <span>›</span>
+            </button>
+          )}
+          <button onClick={() => router.push("/admin/login")}>
+            ✦ Organizer & Admin Portal <span>›</span>
+          </button>
+        </div>
+      </section>}
 
       <nav className={styles.nav} aria-label="Main navigation">{nav.map(([id, glyph, label]) => <button key={id} onClick={() => setActive(id)} className={active === id ? styles.activeNav : ""}><Icon>{glyph}</Icon><span>{label}</span></button>)}</nav>
     </section>

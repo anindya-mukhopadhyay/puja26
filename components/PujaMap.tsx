@@ -36,12 +36,47 @@ export default function PujaMap({ pandals, selectedId, onSelect, editable = fals
     const map = mapRef.current;
     if (!map || state !== "ready") return;
     markersRef.current.forEach((marker) => marker.setMap(null));
-    markersRef.current = pandals.filter((pandal) => Number.isFinite(pandal.latitude) && Number.isFinite(pandal.longitude)).map((pandal) => {
-      const marker = new google.maps.Marker({ position: { lat: pandal.latitude, lng: pandal.longitude }, map, title: pandal.name, zIndex: pandal.id === selectedId ? 10 : 1, icon: { path: google.maps.SymbolPath.CIRCLE, scale: pandal.id === selectedId ? 11 : 8, fillColor: "#C62828", fillOpacity: 1, strokeColor: "#FFF9F0", strokeWeight: 3 } });
-      marker.addListener("click", () => onSelect?.(pandal));
-      return marker;
-    });
-  }, [pandals, selectedId, onSelect, state]);
+    markersRef.current = pandals
+      .filter((pandal) => Number.isFinite(pandal.latitude) && Number.isFinite(pandal.longitude))
+      .map((pandal) => {
+        const isSelected = pandal.id === selectedId;
+        const marker = new google.maps.Marker({
+          position: { lat: pandal.latitude, lng: pandal.longitude },
+          map,
+          title: pandal.name,
+          zIndex: isSelected ? 25 : 5,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: isSelected ? 12 : 9,
+            fillColor: isSelected ? "#780D19" : "#C62828",
+            fillOpacity: 1,
+            strokeColor: isSelected ? "#F5BD32" : "#FFF9F0",
+            strokeWeight: isSelected ? 4 : 2,
+          },
+        });
+        marker.addListener("click", () => onSelect?.(pandal));
+        return marker;
+      });
+
+    if (selectedId) {
+      const active = pandals.find((p) => p.id === selectedId);
+      if (active && Number.isFinite(active.latitude) && Number.isFinite(active.longitude)) {
+        map.panTo({ lat: active.latitude, lng: active.longitude });
+      }
+    } else if (pandals.length > 0 && !pin) {
+      const bounds = new google.maps.LatLngBounds();
+      let hasValidCoords = false;
+      pandals.forEach((p) => {
+        if (Number.isFinite(p.latitude) && Number.isFinite(p.longitude)) {
+          bounds.extend({ lat: p.latitude, lng: p.longitude });
+          hasValidCoords = true;
+        }
+      });
+      if (hasValidCoords && !bounds.isEmpty()) {
+        map.fitBounds(bounds, 60);
+      }
+    }
+  }, [pandals, selectedId, onSelect, state, pin]);
 
   useEffect(() => {
     const map = mapRef.current;

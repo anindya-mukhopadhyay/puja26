@@ -27,7 +27,22 @@ const toPandal = (snapshot: { id: string; data: () => Record<string, unknown> })
 
 export function subscribeToPublishedPandals(onChange: (items: Pandal[]) => void, onError: (message: string) => void) {
   if (!db) { onChange([]); return () => undefined; }
-  return onSnapshot(query(collection(db, "pandals"), where("status", "==", "published"), orderBy("updatedAt", "desc")), (snapshot) => onChange(snapshot.docs.map(toPandal)), (error) => onError(error.message));
+  return onSnapshot(
+    query(collection(db, "pandals"), where("status", "==", "published")),
+    (snapshot) => {
+      const items = snapshot.docs.map(toPandal);
+      items.sort((a, b) => {
+        const timeA = a.updatedAt?.toMillis?.() ?? (a.createdAt?.toMillis?.() ?? 0);
+        const timeB = b.updatedAt?.toMillis?.() ?? (b.createdAt?.toMillis?.() ?? 0);
+        return timeB - timeA;
+      });
+      onChange(items);
+    },
+    (error) => {
+      console.error("Firestore subscription error:", error);
+      onError(error.message);
+    }
+  );
 }
 
 export function subscribeToAdminPandals(onChange: (items: Pandal[]) => void, onError: (message: string) => void) {
