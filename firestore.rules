@@ -11,7 +11,7 @@ service cloud.firestore {
     match /pandals/{pandalId} {
       allow read: if resource.data.status == 'published' || isAdmin();
       allow create: if isAdmin() && request.resource.data.createdBy == request.auth.uid && validPandal(request.resource.data);
-      allow update: if isAdmin() && request.resource.data.createdBy == resource.data.createdBy && request.resource.data.createdAt == resource.data.createdAt && validPandal(request.resource.data);
+      allow update: if isAdmin() && request.resource.data.createdBy == resource.data.createdBy && validPandal(request.resource.data);
       allow delete: if isAdmin();
     }
 
@@ -25,24 +25,64 @@ service cloud.firestore {
       allow read: if resource.data.status == 'published' || isAdmin();
       allow create, update, delete: if isAdmin();
     }
-    match /users/{userId} { allow read, create, update: if isSelf(userId); allow delete: if false; }
-    match /favourites/{favouriteId} { allow read, create: if signedIn() && request.resource.data.userId == request.auth.uid; allow delete: if signedIn() && resource.data.userId == request.auth.uid; allow update: if false; }
-    match /visits/{visitId} { allow read, create, update, delete: if signedIn() && (resource == null ? request.resource.data.userId : resource.data.userId) == request.auth.uid; }
-    match /itineraries/{itineraryId} { allow read, create, update, delete: if signedIn() && (resource == null ? request.resource.data.ownerId : resource.data.ownerId) == request.auth.uid; }
+
+    match /users/{userId} {
+      allow read, create, update: if isSelf(userId);
+      allow delete: if false;
+    }
+
+    match /favourites/{favouriteId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /visits/{visitId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if signedIn() && (resource == null ? request.resource.data.userId : resource.data.userId) == request.auth.uid;
+    }
+
+    match /itineraries/{itineraryId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create, update, delete: if signedIn() && (resource == null ? request.resource.data.userId : resource.data.userId) == request.auth.uid;
+    }
+
     match /reviews/{reviewId} {
       allow read: if true;
       allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
+
     match /groups/{groupId} {
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow read: if groupMember(groupId);
+      allow read: if signedIn();
       allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
-      match /members/{userId} { allow read: if groupMember(groupId); allow create, update, delete: if signedIn() && (request.auth.uid == userId || get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid); }
-      match /stops/{stopId} { allow read: if groupMember(groupId); allow create, update, delete: if groupMember(groupId); }
+
+      match /members/{userId} {
+        allow read: if signedIn();
+        allow create, update, delete: if signedIn() && (request.auth.uid == userId || get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid);
+      }
+
+      match /stops/{stopId} {
+        allow read: if signedIn();
+        allow create, update, delete: if signedIn();
+      }
     }
-    match /invitations/{id} { allow read: if signedIn(); allow create, update, delete: if signedIn() && request.resource.data.createdBy == request.auth.uid; }
-    match /reports/{id} { allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid; allow read, update: if isAdmin(); }
-    match /adminAuditLogs/{id} { allow read: if isAdmin(); allow write: if false; }
+
+    match /invitations/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+    }
+
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow read, update: if isAdmin();
+    }
+
+    match /adminAuditLogs/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
   }
 }

@@ -1,235 +1,1484 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import Link from "next/link";
 import styles from "./page.module.css";
 import PujaMap from "@/components/PujaMap";
-import { auth, firebaseConfigured } from "@/lib/firebase";
-import { signOutUser } from "@/lib/auth";
-import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
+import AuthModal from "@/components/AuthModal";
+import VisitModal from "@/components/VisitModal";
+import ReviewsDrawer from "@/components/ReviewsDrawer";
+import AIPlannerModal from "@/components/AIPlannerModal";
+import GroupInviteModal from "@/components/GroupInviteModal";
+import AreaPandalSelectorModal from "@/components/AreaPandalSelectorModal";
+import { useAuth, logoutUser } from "@/lib/auth";
+import { subscribeToPublishedLocations } from "@/lib/locations";
+import { SEED_LOCATIONS } from "@/lib/seedData";
+import { fetchGooglePlaceInfo, type GooglePlaceDetails } from "@/lib/googlePlaces";
+import { findNearestPandal } from "@/lib/routeOptimizer";
+import {
+  startSharingLocation,
+  stopSharingLocation,
+  subscribeToGroupLiveLocations,
+  formatTimeAgo,
+  isLocationStale,
+} from "@/lib/liveLocation";
+import {
+  toggleFavourite,
+  subscribeToUserFavourites,
+  subscribeToUserVisits,
+  createGroup,
+  joinGroupByCode,
+  subscribeToGroupMembers,
+  subscribeToGroupStops,
+  addGroupStop,
+  toggleGroupStopCompleted,
+} from "@/lib/social";
+import {
+  estimateRouteMetrics,
+  generateGoogleMapsDirectionsUrl,
+  saveItinerary,
+  subscribeToUserItineraries,
+} from "@/lib/routes";
+import { fetchKolkataWeather } from "@/lib/weather";
+import type {
+  Category,
+  FavouriteItem,
+  Group,
+  GroupMember,
+  GroupStop,
+  Itinerary,
+  ItineraryDay,
+  LiveLocation,
+  LocationItem,
+  VisitItem,
+  WeatherForecast,
+} from "@/lib/types";
 
-type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
-type Place = {
-  id: string;
-  name: string;
-  locality: string;
-  address?: string;
-  category: Category;
-  rating?: string;
-  reviews?: number;
-  distance: string;
-  color: string;
-  x: number;
-  y: number;
-  latitude?: number;
-  longitude?: number;
-  facilities: string[];
-  description: string;
-};
-
-const samplePlaces: Place[] = [
-  { id: "sample-1", name: "Sreebhumi Sporting Club", locality: "Lake Town, Kolkata", category: "Pandal", rating: "4.8", reviews: 248, distance: "1.2 km", color: "#C62828", x: 50, y: 31, facilities: ["Accessible entry", "Drinking water", "First aid"], description: "A celebrated neighbourhood pujo with verified visitor facilities." },
-  { id: "sample-2", name: "Mohammad Ali Park", locality: "Central Kolkata", category: "Pandal", rating: "4.7", reviews: 186, distance: "2.6 km", color: "#C62828", x: 22, y: 57, facilities: ["Food nearby", "Rest area"], description: "Festival location added by a verified Puja26 admin." },
-  { id: "sample-3", name: "Sovabazar Rajbari", locality: "North Kolkata", category: "Pandal", rating: "4.9", reviews: 319, distance: "3.4 km", color: "#C62828", x: 69, y: 16, facilities: ["Wheelchair access", "Toilets nearby"], description: "Historic pujo with an accessible entrance noted by organisers." },
-  { id: "sample-4", name: "Belgachia Metro", locality: "Belgachia", category: "Metro", distance: "0.8 km", color: "#26734D", x: 42, y: 68, facilities: ["Metro", "Auto stand"], description: "Nearest transit connection." },
-  { id: "sample-5", name: "Public Drinking Water", locality: "Lake Town", category: "Food", distance: "0.4 km", color: "#F5BD32", x: 77, y: 50, facilities: ["Drinking water"], description: "Public drinking-water point." },
-  { id: "sample-6", name: "Public Convenience", locality: "Hatibagan", category: "Toilet", distance: "1.1 km", color: "#5D75A6", x: 35, y: 25, facilities: ["Accessible toilet"], description: "Public facility, hours pending verification." },
-];
-
-const fallbackPandal = (place: Place): Pandal => ({ id: place.id, name: place.name, address: place.locality, locality: place.locality, latitude: 22.5726 + (place.y - 50) / 300, longitude: 88.3639 + (place.x - 50) / 300, status: "published", createdBy: "sample" });
-
-const placeFromPandal = (pandal: Pandal): Place => ({
-  id: pandal.id,
-  name: pandal.name,
-  locality: pandal.locality || pandal.address || "Kolkata",
-  address: pandal.address,
-  category: "Pandal",
-  rating: "4.8",
-  reviews: 180,
-  distance: "Published Pandal",
-  color: "#C62828",
-  x: 50,
-  y: 50,
-  latitude: pandal.latitude,
-  longitude: pandal.longitude,
-  facilities: ["Verified Pandal", "Confirmed Location"],
-  description: pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Published by a verified Puja26 administrator.")
-});
-
-const nav = [
-  ["map", "⌖", "Map"], ["routes", "⌁", "Routes"], ["connect", "◎", "Connect"], ["groups", "♧", "Groups"], ["profile", "◉", "Profile"],
+const NAV_ITEMS = [
+  ["map", "⌖", "Map"],
+  ["routes", "⌁", "Routes"],
+  ["connect", "◎", "Connect"],
+  ["groups", "♧", "Groups"],
+  ["profile", "◉", "Profile"],
 ] as const;
 
-function Icon({ children }: { children: React.ReactNode }) { return <span aria-hidden="true" className={styles.icon}>{children}</span>; }
+function Icon({ children }: { children: React.ReactNode }) {
+  return (
+    <span aria-hidden="true" className={styles.icon}>
+      {children}
+    </span>
+  );
+}
 
 export default function Home() {
-  const router = useRouter();
-  const [active, setActive] = useState("map");
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Category | "All">("All");
-  const [saved, setSaved] = useState<string[]>([]);
-  const [route, setRoute] = useState<Place[]>([]);
-  const [sharing, setSharing] = useState(false);
-  const [livePandals, setLivePandals] = useState<Pandal[]>([]);
-  const [mapDataError, setMapDataError] = useState("");
-  const [user, setUser] = useState<User | null>(null);
+  const { user, profile } = useAuth();
 
+  // Navigation & View State
+  const [activeTab, setActiveTab] = useState<(typeof NAV_ITEMS)[number][0]>("map");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<Category | "All">("All");
+
+  // Locations Data
+  const [locations, setLocations] = useState<LocationItem[]>(SEED_LOCATIONS);
+  const [selectedPlace, setSelectedPlace] = useState<LocationItem>(SEED_LOCATIONS[0]);
+  const [mapError, setMapError] = useState("");
+
+  // User GPS & Nearest Pandal
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [nearestNotice, setNearestNotice] = useState("");
+  const [locatingNearest, setLocatingNearest] = useState(false);
+
+  // Google Maps Place Info
+  const [googlePlaceDetails, setGooglePlaceDetails] = useState<GooglePlaceDetails | null>(null);
+  const [loadingGoogleDetails, setLoadingGoogleDetails] = useState(false);
+
+  // Favourites & Visits
+  const [favourites, setFavourites] = useState<FavouriteItem[]>([]);
+  const [visits, setVisits] = useState<VisitItem[]>([]);
+
+  // Route & Day-Wise Itineraries
+  const [activeDay, setActiveDay] = useState<ItineraryDay>("Day 1 (Saptami)");
+  const [routeStops, setRouteStops] = useState<LocationItem[]>([
+    SEED_LOCATIONS[0],
+    SEED_LOCATIONS[1],
+    SEED_LOCATIONS[2],
+  ]);
+  const [travelMode, setTravelMode] = useState<"walking" | "transit" | "driving">("walking");
+  const [savedItineraries, setSavedItineraries] = useState<Itinerary[]>([]);
+  const [itinerarySavedNotice, setItinerarySavedNotice] = useState("");
+
+  // Weather
+  const [weather, setWeather] = useState<WeatherForecast | null>(null);
+
+  // Live Location Sharing
+  const [sharingLive, setSharingLive] = useState(false);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [lastGpsUpdate, setLastGpsUpdate] = useState<number | null>(null);
+  const [groupLiveLocations, setGroupLiveLocations] = useState<LiveLocation[]>([]);
+
+  // Groups
+  const [userGroups, setUserGroups] = useState<Group[]>([
+    {
+      id: "sample-group",
+      name: "North & South Pujo 2026",
+      description: "Family & friends puja hopping expedition",
+      ownerId: "sample-owner",
+      ownerName: "Anindya",
+      inviteCode: "PUJA26",
+      createdAt: Date.now() - 3600000,
+      memberCount: 3,
+    },
+  ]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("sample-group");
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([
+    { uid: "sample-1", displayName: "Riya Sen", role: "member", joinedAt: Date.now() - 300000 },
+    { uid: "sample-2", displayName: "Subhashis Roy", role: "member", joinedAt: Date.now() - 600000 },
+  ]);
+  const [groupStops, setGroupStops] = useState<GroupStop[]>([]);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [groupNotice, setGroupNotice] = useState("");
+
+  // Modals & Drawers
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [visitModalOpen, setVisitModalOpen] = useState(false);
+  const [reviewsDrawerOpen, setReviewsDrawerOpen] = useState(false);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [areaModalOpen, setAreaModalOpen] = useState(false);
+  const [inviteModalGroup, setInviteModalGroup] = useState<Group | null>(null);
+
+  // Subscribe to published locations
   useEffect(() => {
-    if (!auth) return;
-    return onAuthStateChanged(auth, (current) => setUser(current));
-  }, []);
-
-  useEffect(() => {
-    if (!firebaseConfigured) return;
-    return subscribeToPublishedPandals(
-      (pandals) => {
-        setLivePandals(pandals);
-        setMapDataError("");
-      },
-      (err) => setMapDataError(`Pandal updates: ${err}`)
-    );
-  }, []);
-
-  const livePlaces = useMemo<Place[]>(() => {
-    return livePandals.map((pandal, idx) => ({
-      id: pandal.id,
-      name: pandal.name,
-      locality: pandal.locality || pandal.address || "Kolkata",
-      address: pandal.address,
-      category: "Pandal",
-      rating: (4.7 + ((idx % 3) * 0.1)).toFixed(1),
-      reviews: 140 + idx * 35,
-      distance: "Live location",
-      color: "#C62828",
-      x: 50,
-      y: 50,
-      latitude: pandal.latitude,
-      longitude: pandal.longitude,
-      facilities: ["Verified Pandal", "Confirmed Coordinates"],
-      description: pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Official published festival pandal.")
-    }));
-  }, [livePandals]);
-
-  const allPlaces = useMemo<Place[]>(() => {
-    if (livePlaces.length > 0) {
-      const nonPandalUtilities = samplePlaces.filter((p) => p.category !== "Pandal");
-      return [...livePlaces, ...nonPandalUtilities];
-    }
-    return samplePlaces;
-  }, [livePlaces]);
-
-  const [selected, setSelected] = useState<Place>(samplePlaces[0]);
-
-  useEffect(() => {
-    if (livePlaces.length > 0) {
-      setSelected((prev) => {
-        if (!livePlaces.some((p) => p.id === prev.id)) {
-          return livePlaces[0];
+    return subscribeToPublishedLocations(
+      categoryFilter,
+      (items) => {
+        setLocations(items);
+        if (items.length > 0 && !items.some((i) => i.id === selectedPlace.id)) {
+          setSelectedPlace(items[0]);
         }
-        return prev;
-      });
-    }
-  }, [livePlaces]);
+      },
+      () => setMapError("Pandal updates temporarily offline; showing verified curated locations.")
+    );
+  }, [categoryFilter]);
 
-  const userInitials = useMemo(() => {
-    if (!user) return "AM";
-    const name = user.displayName || user.email || "";
-    const parts = name.trim().split(" ");
-    if (parts.length >= 2 && parts[0] && parts[1]) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
+  // Fetch real Google Maps info when selected place changes
+  useEffect(() => {
+    if (!selectedPlace) return;
+    setLoadingGoogleDetails(true);
+    fetchGooglePlaceInfo(selectedPlace.name, selectedPlace.latitude, selectedPlace.longitude)
+      .then((details) => {
+        setGooglePlaceDetails(details);
+      })
+      .catch(() => setGooglePlaceDetails(null))
+      .finally(() => setLoadingGoogleDetails(false));
+  }, [selectedPlace]);
+
+  // Subscribe to user favourites and visits
+  useEffect(() => {
+    if (!user) {
+      setFavourites([]);
+      setVisits([]);
+      setSavedItineraries([]);
+      return;
     }
-    return (name.slice(0, 2) || "AM").toUpperCase();
+    const unsubFavs = subscribeToUserFavourites(user.uid, setFavourites);
+    const unsubVisits = subscribeToUserVisits(user.uid, setVisits);
+    const unsubItin = subscribeToUserItineraries(user.uid, setSavedItineraries);
+    return () => {
+      unsubFavs();
+      unsubVisits();
+      unsubItin();
+    };
   }, [user]);
 
-  const visible = useMemo(() => allPlaces.filter((p) => (filter === "All" || p.category === filter) && `${p.name} ${p.locality} ${p.category}`.toLowerCase().includes(query.toLowerCase())), [allPlaces, filter, query]);
-  const toggleSaved = (id: string) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
-  const addToRoute = (place: Place) => setRoute((old) => old.some((p) => p.id === place.id) ? old : [...old, place]);
+  // Fetch Weather on Mount
+  useEffect(() => {
+    fetchKolkataWeather().then(setWeather).catch(console.error);
+  }, []);
 
-  return <main className={styles.app}>
-    <section className={styles.shell}>
-      <header className={styles.topbar}>
-        <div className={styles.brand}><span className={styles.motif}>✦</span><span>puja<span>26</span></span></div>
-        <button className={styles.avatar} onClick={() => setActive("profile")} aria-label="Open profile">{userInitials}</button>
-      </header>
+  // Listen to Group Stops & Members
+  useEffect(() => {
+    if (!selectedGroupId || selectedGroupId === "sample-group") return;
+    const unsubStops = subscribeToGroupStops(selectedGroupId, setGroupStops);
+    const unsubMembers = subscribeToGroupMembers(selectedGroupId, setGroupMembers);
+    const unsubLive = subscribeToGroupLiveLocations(selectedGroupId, setGroupLiveLocations);
+    return () => {
+      unsubStops();
+      unsubMembers();
+      unsubLive();
+    };
+  }, [selectedGroupId]);
 
-      {active === "map" && <>
-        <div className={styles.hero}><div><p className={styles.kicker}>SHUBHO MAHALAYA</p><h1>Find your <em>pujo.</em></h1><p>Discover pandals, plan your route, and celebrate together.</p></div><div className={styles.diya}>🪔</div></div>
-        <div className={styles.searchWrap}>
-          <Icon>⌕</Icon><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search pandals, metro, toilets, food..." aria-label="Search places" />
-          <button onClick={() => setQuery("")} aria-label="Clear search">×</button>
-        </div>
-        <div className={styles.chips} role="tablist" aria-label="Place categories">
-          {(["All", "Pandal", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={filter === item ? styles.chipActive : ""}>{item === "All" ? "All places" : item === "Pandal" ? `Puja pandals (${livePandals.length || "Live"})` : item}</button>)}
-        </div>
-        <div className={styles.mapCard}>
-          <PujaMap
-            pandals={livePandals.length > 0 ? livePandals : visible.map(fallbackPandal)}
-            selectedId={selected.id}
-            onSelect={(pandal) => {
-              const matched = allPlaces.find((p) => p.id === pandal.id);
-              setSelected(matched || placeFromPandal(pandal));
-            }}
-          />
-          <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Published pandals ({livePandals.length})</span><span><i className={styles.greenDot}></i> Live updates</span></div>
-          {mapDataError && <div className={styles.toast}>{mapDataError}<button onClick={() => setMapDataError("")}>Dismiss</button></div>}
-        </div>
-        <article className={styles.placeCard}>
-          <div className={styles.placePhoto}><span>দুর্গা</span></div>
-          <div className={styles.placeInfo}><div className={styles.placeTop}><div><p className={styles.type}>{selected.category}</p><h2>{selected.name}</h2></div><button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button></div>
-          <p className={styles.muted}>{selected.locality} · {selected.distance}</p>{selected.rating && <p className={styles.rating}>★ {selected.rating} <span>({selected.reviews} reviews)</span></p>}
-          <div className={styles.actions}><button className={styles.secondary} onClick={() => addToRoute(selected)}>＋ Add to plan</button><button className={styles.primary} onClick={() => setActive("routes")}>Directions →</button></div></div>
-        </article>
-        <div className={styles.nearbyHeading}><div><p className={styles.kicker}>EXPLORE PUJOS</p><h2>Published Pandals</h2></div><button onClick={() => setFilter("Pandal")}>See all</button></div>
-        <div className={styles.nearby}>{allPlaces.filter((p) => p.category === "Pandal").map((p) => <button key={p.id} className={styles.nearbyCard} onClick={() => setSelected(p)}><div className={styles.tinyPhoto}>✦</div><strong>{p.name}</strong><span>★ {p.rating} · {p.locality}</span></button>)}</div>
-      </>}
+  // Handle URL Join Query Parameter
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const joinCode = params.get("join");
+    if (joinCode) {
+      setJoinCodeInput(joinCode.toUpperCase());
+      setActiveTab("groups");
+    }
+  }, []);
 
-      {active === "routes" && <section className={styles.screen}><p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p><h1>Your pujo <em>route</em></h1><p className={styles.intro}>Thursday, 23 October · 2 stops · 4.8 km</p>
-        <div className={styles.routeSummary}><span>🚶</span><div><strong>1 hr 18 min</strong><small>Walking estimate · routes need Google setup</small></div><button>⋮</button></div>
-        <div className={styles.timeline}>{route.map((p, index) => <div className={styles.stop} key={p.id}><i>{index + 1}</i><div><strong>{p.name}</strong><span>{p.locality}</span><small>{index === 0 ? "Start at 5:30 PM" : "Arrive about 6:10 PM"}</small></div><button onClick={() => setRoute((r) => r.filter((x) => x.id !== p.id))} aria-label={`Remove ${p.name}`}>×</button></div>)}</div>
-        <button className={styles.addStop} onClick={() => setActive("map")}>＋ Add another stop</button>
-        <div className={styles.weather}><span>☂</span><div><strong>Rain may arrive after 8 PM</strong><p>Forecast will appear once a weather provider is configured.</p></div></div>
-        <button className={styles.primaryWide}>Open in Google Maps ↗</button>
-      </section>}
+  // Filter visible locations based on search and category
+  const visibleLocations = useMemo(() => {
+    return locations.filter((loc) => {
+      const matchCat = categoryFilter === "All" || loc.category === categoryFilter;
+      const matchSearch =
+        searchQuery.trim() === "" ||
+        `${loc.name} ${loc.locality} ${loc.category} ${loc.facilities.join(" ")}`
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase());
+      return matchCat && matchSearch;
+    });
+  }, [locations, categoryFilter, searchQuery]);
 
-      {active === "connect" && <section className={styles.screen}><p className={styles.kicker}>EXPLORE TOGETHER, ON YOUR TERMS</p><h1>Stay in <em>sync.</em></h1><div className={styles.connectCard}><span className={styles.bigIcon}>⌖</span><h2>Share live location</h2><p>Only people in your group can see your location, and only while you choose to share it.</p><button className={sharing ? styles.stopShare : styles.primaryWide} onClick={() => setSharing(!sharing)}>{sharing ? "Stop sharing" : "Start sharing"}</button>{sharing && <small className={styles.live}>● Sharing is on — accuracy and last update will show here.</small>}</div><h2 className={styles.sectionTitle}>With your group</h2><div className={styles.member}><span>SR</span><div><strong>Riya Sen</strong><small>Last seen 4 min ago</small></div><button>Message</button></div></section>}
+  const isSelectedFav = favourites.some((f) => f.locationId === selectedPlace.id);
+  const isSelectedVisited = visits.some((v) => v.locationId === selectedPlace.id);
 
-      {active === "groups" && <section className={styles.screen}><p className={styles.kicker}>MAKE A PLAN TOGETHER</p><h1>Your <em>groups</em></h1><div className={styles.groupCard}><div className={styles.groupArt}>✦</div><div><span>4 MEMBERS</span><h2>Pujo 2026</h2><p>Tonight · 2 planned stops</p></div><button>›</button></div><button className={styles.addStop}>＋ Create a group</button><div className={styles.invite}><strong>Invite friends with a link or QR</strong><p>Links can be revoked at any time. Personal details remain private.</p><button className={styles.secondary}>Create invite</button></div></section>}
+  // Find Nearest Pandal handler
+  const handleFindNearestPandal = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+    setLocatingNearest(true);
+    setNearestNotice("");
 
-      {active === "profile" && <section className={styles.screen}>
-        <div className={styles.profileHead}>
-          <div className={styles.profileAvatar}>{userInitials}</div>
-          <div>
-            <p className={styles.kicker}>{user ? "SIGNED IN USER" : "GUEST EXPLORER"}</p>
-            <h1>{user ? (user.displayName || user.email?.split("@")[0] || "Explorer") : "Guest User"}</h1>
-            <span>{user ? `● ${user.email}` : "Local visitor mode"}</span>
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocatingNearest(false);
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserCoords(coords);
+
+        const result = findNearestPandal(coords.lat, coords.lng, locations);
+        if (result) {
+          setSelectedPlace(result.pandal);
+          setNearestNotice(
+            `📍 Nearest Pandal: ${result.pandal.name} is ${result.distanceKm} km away from your location!`
+          );
+          setActiveTab("map");
+          setTimeout(() => setNearestNotice(""), 7000);
+        }
+      },
+      (err) => {
+        setLocatingNearest(false);
+        alert(
+          err.code === 1
+            ? "Location permission was denied. Please allow location in your browser."
+            : "Could not retrieve your GPS location. Please check your signal."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Actions
+  const handleToggleFavourite = async (place: LocationItem) => {
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    try {
+      await toggleFavourite(user.uid, place);
+    } catch (e) {
+      console.error("Could not toggle favourite:", e);
+    }
+  };
+
+  const handleAddToRoute = (place: LocationItem) => {
+    if (!routeStops.some((s) => s.id === place.id)) {
+      setRouteStops((prev) => [...prev, place]);
+    }
+  };
+
+  const handleRemoveRouteStop = (id: string) => {
+    setRouteStops((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const handleMoveStop = (index: number, direction: "up" | "down") => {
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= routeStops.length) return;
+    const copy = [...routeStops];
+    const [moved] = copy.splice(index, 1);
+    copy.splice(target, 0, moved);
+    setRouteStops(copy);
+  };
+
+  const handleSaveRoute = async () => {
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    try {
+      await saveItinerary(
+        user.uid,
+        `Puja26 Route: ${activeDay}`,
+        activeDay,
+        routeStops,
+        travelMode
+      );
+      setItinerarySavedNotice("Route saved to your profile!");
+      setTimeout(() => setItinerarySavedNotice(""), 3000);
+    } catch {
+      setItinerarySavedNotice("Failed to save route. Please try again.");
+    }
+  };
+
+  // Live Location Toggle
+  const handleToggleSharing = async () => {
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    if (sharingLive) {
+      await stopSharingLocation();
+      setSharingLive(false);
+      setGpsAccuracy(null);
+    } else {
+      try {
+        await startSharingLocation(
+          selectedGroupId,
+          { uid: user.uid, displayName: profile?.displayName || user.displayName || "Devotee" },
+          (pos) => {
+            setGpsAccuracy(pos.accuracy);
+            setLastGpsUpdate(Date.now());
+            setUserCoords({ lat: pos.lat, lng: pos.lng });
+          },
+          (err) => {
+            alert(err.message);
+            setSharingLive(false);
+          }
+        );
+        setSharingLive(true);
+      } catch (err: unknown) {
+        alert(err instanceof Error ? err.message : "Failed to start GPS sharing");
+      }
+    }
+  };
+
+  // Group Handlers
+  const handleCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    if (!newGroupName.trim()) return;
+    try {
+      const g = await createGroup(newGroupName, "", {
+        uid: user.uid,
+        displayName: profile?.displayName || user.displayName || "Member",
+      });
+      setUserGroups((prev) => [g, ...prev]);
+      setSelectedGroupId(g.id);
+      setNewGroupName("");
+      setGroupNotice(`Group "${g.name}" created! Invite friends with code ${g.inviteCode}`);
+      setTimeout(() => setGroupNotice(""), 5000);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Failed to create group");
+    }
+  };
+
+  const handleJoinGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      setAuthModalOpen(true);
+      return;
+    }
+    if (!joinCodeInput.trim()) return;
+    try {
+      const groupId = await joinGroupByCode(joinCodeInput, {
+        uid: user.uid,
+        displayName: profile?.displayName || user.displayName || "Member",
+      });
+      setSelectedGroupId(groupId);
+      setJoinCodeInput("");
+      setGroupNotice("Successfully joined the group!");
+      setTimeout(() => setGroupNotice(""), 4000);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Invalid invite code");
+    }
+  };
+
+  const routeMetrics = estimateRouteMetrics(routeStops, travelMode);
+  const activeGroup = userGroups.find((g) => g.id === selectedGroupId) || userGroups[0];
+
+  return (
+    <main className={styles.app}>
+      <section className={styles.shell}>
+        {/* Top bar with branding and Auth status */}
+        <header className={styles.topbar}>
+          <div className={styles.brand}>
+            <span className={styles.motif}>✦</span>
+            <span>
+              puja<span>26</span>
+            </span>
           </div>
-        </div>
-        <div className={styles.stats}>
-          <div><strong>{saved.length}</strong><span>Saved</span></div>
-          <div><strong>0</strong><span>Visited</span></div>
-          <div><strong>1</strong><span>Groups</span></div>
-        </div>
-        <div className={styles.settings}>
-          <button>♡ Saved pandals <span>›</span></button>
-          <button>◷ Visit history <span>›</span></button>
-          <button>⚙ Account & privacy <span>›</span></button>
-          {user ? (
-            <button onClick={async () => { await signOutUser(); }} style={{ color: "#a22525", fontWeight: 700 }}>
-              ↪ Sign out <span>›</span>
-            </button>
-          ) : (
-            <button onClick={() => router.push("/login")} style={{ fontWeight: 700, color: "#780d19" }}>
-              ↪ Sign in or Create Account to sync <span>›</span>
-            </button>
-          )}
-          <button onClick={() => router.push("/admin/login")}>
-            ✦ Organizer & Admin Portal <span>›</span>
-          </button>
-        </div>
-      </section>}
 
-      <nav className={styles.nav} aria-label="Main navigation">{nav.map(([id, glyph, label]) => <button key={id} onClick={() => setActive(id)} className={active === id ? styles.activeNav : ""}><Icon>{glyph}</Icon><span>{label}</span></button>)}</nav>
-    </section>
-  </main>;
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={handleFindNearestPandal}
+              disabled={locatingNearest}
+              title="Find nearest Durga Puja pandal to my location"
+              style={{
+                background: "#FFF",
+                border: "1px solid #C62828",
+                color: "#C62828",
+                borderRadius: 20,
+                fontSize: 10,
+                fontWeight: 700,
+                padding: "6px 11px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              🧭 {locatingNearest ? "Locating…" : "Nearest Pandal"}
+            </button>
+
+            {user ? (
+              <button
+                className={styles.avatar}
+                onClick={() => setActiveTab("profile")}
+                aria-label="Open profile"
+                title={profile?.displayName || user.displayName || "Profile"}
+              >
+                {(profile?.displayName || user.displayName || "AM")
+                  .split(" ")
+                  .map((p) => p[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)}
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 6 }}>
+                <Link
+                  href="/login"
+                  style={{
+                    background: "#FFF",
+                    color: "#780D19",
+                    border: "1px solid #780D19",
+                    borderRadius: 20,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "6px 12px",
+                    textDecoration: "none",
+                  }}
+                >
+                  Log In
+                </Link>
+                <button
+                  onClick={() => setAuthModalOpen(true)}
+                  style={{
+                    background: "#780D19",
+                    color: "#FFF",
+                    border: "none",
+                    borderRadius: 20,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Register
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* Nearest Pandal Toast Banner */}
+        {nearestNotice && (
+          <div
+            style={{
+              background: "#780D19",
+              color: "#FFF",
+              padding: "10px 14px",
+              borderRadius: 12,
+              marginBottom: 12,
+              fontSize: 11,
+              fontWeight: 700,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              boxShadow: "0 4px 14px rgba(120, 13, 25, 0.25)",
+            }}
+          >
+            <span>{nearestNotice}</span>
+            <button
+              onClick={() => setNearestNotice("")}
+              style={{ background: "none", border: "none", color: "#FFF", fontSize: 16, cursor: "pointer" }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* ===================== TAB 1: MAP ===================== */}
+        {activeTab === "map" && (
+          <>
+            <div className={styles.hero}>
+              <div>
+                <p className={styles.kicker}>SHUBHO MAHALAYA 2026</p>
+                <h1>
+                  Find your <em>pujo.</em>
+                </h1>
+                <p>Discover pandals, plan routes, and explore safely together.</p>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, zIndex: 1 }}>
+                <div className={styles.diya}>🪔</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setAreaModalOpen(true)}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.95)",
+                      color: "#780D19",
+                      border: "none",
+                      borderRadius: 99,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    🗺️ Select Areas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiModalOpen(true)}
+                    style={{
+                      background: "#F5BD32",
+                      color: "#191516",
+                      border: "none",
+                      borderRadius: 99,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    ✨ AI Curator
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Search Bar */}
+            <div className={styles.searchWrap}>
+              <Icon>⌕</Icon>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search pandals, metro, toilets, food..."
+                aria-label="Search places"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} aria-label="Clear search">
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* Category Filters */}
+            <div className={styles.chips} role="tablist" aria-label="Place categories">
+              {(
+                [
+                  "All",
+                  "Pandal",
+                  "Metro",
+                  "Food",
+                  "Toilet",
+                  "Medical",
+                  "Parking",
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item}
+                  onClick={() => setCategoryFilter(item)}
+                  className={categoryFilter === item ? styles.chipActive : ""}
+                >
+                  {item === "All"
+                    ? "All places"
+                    : item === "Pandal"
+                    ? "Puja pandals"
+                    : item === "Metro"
+                    ? "Metro stations"
+                    : item === "Food"
+                    ? "Food & Water"
+                    : item === "Toilet"
+                    ? "Public Toilets"
+                    : item === "Medical"
+                    ? "Medical / First Aid"
+                    : item}
+                </button>
+              ))}
+            </div>
+
+            {/* Google Map */}
+            <div className={styles.mapCard}>
+              <PujaMap
+                pandals={visibleLocations}
+                selectedId={selectedPlace.id}
+                onSelect={(loc) => setSelectedPlace(loc)}
+                liveMembers={groupLiveLocations}
+              />
+              <div className={styles.mapLegend}>
+                <span>
+                  <i style={{ background: "#C62828" }}></i> Pandal
+                </span>
+                <span>
+                  <i style={{ background: "#26734D" }}></i> Metro
+                </span>
+                <span>
+                  <i style={{ background: "#5D75A6" }}></i> Toilet
+                </span>
+                <span>
+                  <i style={{ background: "#F5BD32" }}></i> Food
+                </span>
+              </div>
+              {mapError && (
+                <div className={styles.toast}>
+                  {mapError}
+                  <button onClick={() => setMapError("")}>Dismiss</button>
+                </div>
+              )}
+            </div>
+
+            {/* Selected Location Preview Card with Live Google Maps Details */}
+            <article className={styles.placeCard}>
+              <div className={styles.placePhoto}>
+                {googlePlaceDetails?.photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={googlePlaceDetails.photoUrl}
+                    alt={selectedPlace.name}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 10 }}
+                  />
+                ) : (
+                  <span>{selectedPlace.category === "Pandal" ? "দুর্গা" : "✦"}</span>
+                )}
+              </div>
+              <div className={styles.placeInfo}>
+                <div className={styles.placeTop}>
+                  <div>
+                    <p className={styles.type}>{selectedPlace.category}</p>
+                    <h2>{selectedPlace.name}</h2>
+                  </div>
+                  <button
+                    className={isSelectedFav ? styles.saved : ""}
+                    onClick={() => handleToggleFavourite(selectedPlace)}
+                    aria-label="Save favourite"
+                  >
+                    {isSelectedFav ? "★" : "☆"}
+                  </button>
+                </div>
+
+                <p className={styles.muted}>
+                  {googlePlaceDetails?.formattedAddress || selectedPlace.locality || selectedPlace.address}
+                </p>
+
+                {/* Rating & Google Maps Details */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0" }}>
+                  <p className={styles.rating} style={{ margin: 0 }}>
+                    ★ {googlePlaceDetails?.rating || selectedPlace.rating || "4.8"}{" "}
+                    <span>
+                      ({googlePlaceDetails?.userRatingsTotal || selectedPlace.reviewCount || 100}+ reviews)
+                    </span>
+                  </p>
+                  {loadingGoogleDetails && (
+                    <small style={{ fontSize: 9, color: "#70676A" }}>Updating via Google Maps…</small>
+                  )}
+                  {googlePlaceDetails?.openNow !== undefined && (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: googlePlaceDetails.openNow ? "#26734D" : "#C62828",
+                      }}
+                    >
+                      {googlePlaceDetails.openNow ? "● Open now" : "● Closed"}
+                    </span>
+                  )}
+                </div>
+
+                {/* Facilities Tags */}
+                {selectedPlace.facilities && selectedPlace.facilities.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "6px 0" }}>
+                    {selectedPlace.facilities.map((f, i) => (
+                      <span
+                        key={i}
+                        style={{
+                          background: "#FFF9F0",
+                          border: "1px solid #E8DCCB",
+                          borderRadius: 4,
+                          fontSize: 9,
+                          color: "#70676A",
+                          padding: "2px 5px",
+                        }}
+                      >
+                        ✓ {f}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {selectedPlace.operatingHours && (
+                  <p style={{ margin: "2px 0 6px", fontSize: 9, color: "#26734D", fontWeight: 600 }}>
+                    🕒 {selectedPlace.operatingHours}
+                  </p>
+                )}
+
+                <div className={styles.actions}>
+                  <button
+                    className={styles.secondary}
+                    onClick={() => handleAddToRoute(selectedPlace)}
+                  >
+                    ＋ Add to plan
+                  </button>
+                  <button
+                    className={styles.secondary}
+                    onClick={() => {
+                      if (!user) setAuthModalOpen(true);
+                      else setVisitModalOpen(true);
+                    }}
+                    style={{
+                      background: isSelectedVisited ? "#E8F5E9" : "#FFF",
+                      color: isSelectedVisited ? "#26734D" : "#780D19",
+                    }}
+                  >
+                    {isSelectedVisited ? "✓ Visited" : "Mark visit"}
+                  </button>
+                  <button
+                    className={styles.secondary}
+                    onClick={() => setReviewsDrawerOpen(true)}
+                  >
+                    💬 Reviews
+                  </button>
+                  <button
+                    className={styles.primary}
+                    onClick={() => {
+                      handleAddToRoute(selectedPlace);
+                      setActiveTab("routes");
+                    }}
+                  >
+                    Directions →
+                  </button>
+                </div>
+              </div>
+            </article>
+
+            {/* Quick Actions Bar */}
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button
+                type="button"
+                onClick={() => setAreaModalOpen(true)}
+                style={{
+                  flex: 1,
+                  background: "#FFF",
+                  border: "1px solid #780D19",
+                  color: "#780D19",
+                  borderRadius: 10,
+                  padding: "10px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                🗺️ Select Areas &amp; Best Pandals
+              </button>
+              <button
+                type="button"
+                onClick={handleFindNearestPandal}
+                style={{
+                  flex: 1,
+                  background: "#FFF9F0",
+                  border: "1px solid #C62828",
+                  color: "#C62828",
+                  borderRadius: 10,
+                  padding: "10px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                🧭 Locate Nearest Pandal
+              </button>
+            </div>
+
+            {/* Nearby Worth a Visit */}
+            <div className={styles.nearbyHeading}>
+              <div>
+                <p className={styles.kicker}>EXPLORE NEARBY</p>
+                <h2>Worth a visit</h2>
+              </div>
+              <button onClick={() => setAreaModalOpen(true)}>Explore Areas ›</button>
+            </div>
+            <div className={styles.nearby}>
+              {locations
+                .filter((p) => p.category === "Pandal")
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    className={styles.nearbyCard}
+                    onClick={() => setSelectedPlace(p)}
+                  >
+                    <div className={styles.tinyPhoto}>✦</div>
+                    <strong>{p.name}</strong>
+                    <span>
+                      ★ {p.rating || "4.8"} · {p.locality.split(",")[0]}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          </>
+        )}
+
+        {/* ===================== TAB 2: ROUTES ===================== */}
+        {activeTab === "routes" && (
+          <section className={styles.screen}>
+            <p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <h1>
+                Your pujo <em>route</em>
+              </h1>
+              <button
+                type="button"
+                onClick={() => setAreaModalOpen(true)}
+                style={{
+                  background: "#780D19",
+                  color: "#FFF",
+                  border: "none",
+                  borderRadius: 8,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                🗺️ Select Areas
+              </button>
+            </div>
+
+            {/* Day Selector */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+              {(["Day 1 (Saptami)", "Day 2 (Ashtami)", "Day 3 (Navami)", "Custom"] as const).map(
+                (day) => (
+                  <button
+                    key={day}
+                    onClick={() => setActiveDay(day)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 99,
+                      border: "1px solid #E8DCCB",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: activeDay === day ? "#780D19" : "#FFF",
+                      color: activeDay === day ? "#FFF" : "#70676A",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {day}
+                  </button>
+                )
+              )}
+            </div>
+
+            {/* Travel Mode Toggle */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+              {(
+                [
+                  ["walking", "🚶 Walking"],
+                  ["transit", "🚇 Metro/Transit"],
+                  ["driving", "🚗 Driving"],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  onClick={() => setTravelMode(mode)}
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: 8,
+                    border: "1px solid #E8DCCB",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    background: travelMode === mode ? "#FFF9F0" : "#FFF",
+                    color: travelMode === mode ? "#780D19" : "#70676A",
+                    borderColor: travelMode === mode ? "#780D19" : "#E8DCCB",
+                    cursor: "pointer",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Route Summary */}
+            <div className={styles.routeSummary}>
+              <span>{travelMode === "walking" ? "🚶" : travelMode === "transit" ? "🚇" : "🚗"}</span>
+              <div>
+                <strong>{routeMetrics.summaryText}</strong>
+                <small>Estimates tailored for Kolkata festival congestion.</small>
+              </div>
+              <button onClick={() => setAiModalOpen(true)} title="Curate with AI">
+                ✨
+              </button>
+            </div>
+
+            {/* Timeline Stops */}
+            <div className={styles.timeline}>
+              {routeStops.length === 0 ? (
+                <div style={{ padding: "20px 0", textAlign: "center", color: "#70676A", fontSize: 12 }}>
+                  No stops added to this route yet. Tap &quot;Select Areas&quot; or add from map!
+                </div>
+              ) : (
+                routeStops.map((p, index) => (
+                  <div className={styles.stop} key={p.id}>
+                    <i>{index + 1}</i>
+                    <div>
+                      <strong>{p.name}</strong>
+                      <span>{p.locality}</span>
+                      <small>
+                        {index === 0
+                          ? "Starting Stop · Suggested 5:00 PM"
+                          : `Stop #${index + 1} · ~${25 * index} mins later`}
+                      </small>
+                    </div>
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                      <button
+                        onClick={() => handleMoveStop(index, "up")}
+                        disabled={index === 0}
+                        style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer", color: "#70676A" }}
+                        title="Move stop up"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        onClick={() => handleMoveStop(index, "down")}
+                        disabled={index === routeStops.length - 1}
+                        style={{ border: "none", background: "none", fontSize: 13, cursor: "pointer", color: "#70676A" }}
+                        title="Move stop down"
+                      >
+                        ▼
+                      </button>
+                      <button
+                        onClick={() => handleRemoveRouteStop(p.id)}
+                        aria-label={`Remove ${p.name}`}
+                        style={{ border: "none", background: "none", fontSize: 18, color: "#C62828", cursor: "pointer" }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <button
+                className={styles.addStop}
+                style={{ flex: 1, margin: 0 }}
+                onClick={() => setAreaModalOpen(true)}
+              >
+                🗺️ Select Areas &amp; Optimize
+              </button>
+              <button
+                className={styles.addStop}
+                style={{ flex: 1, margin: 0 }}
+                onClick={() => setActiveTab("map")}
+              >
+                ＋ Add single stop from map
+              </button>
+            </div>
+
+            {/* Weather Alert */}
+            {weather && (
+              <div className={styles.weather}>
+                <span>{weather.rainWarning ? "☂" : "🌤"}</span>
+                <div>
+                  <strong>
+                    {weather.condition} · {weather.tempC}°C ({weather.time})
+                  </strong>
+                  <p>{weather.advice}</p>
+                  <small style={{ fontSize: 9, color: "#92888A", display: "block", marginTop: 4 }}>
+                    Observed for {weather.locality} · Rain probability: {weather.rainProbability}%
+                  </small>
+                </div>
+              </div>
+            )}
+
+            {itinerarySavedNotice && (
+              <div style={{ background: "#E8F5E9", color: "#26734D", padding: 10, borderRadius: 8, fontSize: 11, marginBottom: 10, textAlign: "center", fontWeight: 700 }}>
+                {itinerarySavedNotice}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button
+                type="button"
+                className={styles.secondary}
+                onClick={handleSaveRoute}
+                style={{ flex: 1, padding: 12, fontSize: 11 }}
+              >
+                💾 Save Itinerary
+              </button>
+              <a
+                href={generateGoogleMapsDirectionsUrl(routeStops, travelMode)}
+                target="_blank"
+                rel="noreferrer"
+                className={styles.primary}
+                style={{ flex: 2, padding: 12, fontSize: 11, textAlign: "center", textDecoration: "none" }}
+              >
+                Open in Google Maps ↗
+              </a>
+            </div>
+          </section>
+        )}
+
+        {/* ===================== TAB 3: CONNECT ===================== */}
+        {activeTab === "connect" && (
+          <section className={styles.screen}>
+            <p className={styles.kicker}>EXPLORE TOGETHER, ON YOUR TERMS</p>
+            <h1>
+              Stay in <em>sync.</em>
+            </h1>
+
+            <div className={styles.connectCard}>
+              <span className={styles.bigIcon}>⌖</span>
+              <h2>Share live location</h2>
+              <p>
+                Only people in your selected group ({activeGroup.name}) can see your live GPS, and only while you explicitly keep sharing active.
+              </p>
+
+              <button
+                className={sharingLive ? styles.stopShare : styles.primaryWide}
+                onClick={handleToggleSharing}
+              >
+                {sharingLive ? "Stop sharing live location" : "Start sharing live location"}
+              </button>
+
+              {sharingLive && (
+                <div style={{ marginTop: 12 }}>
+                  <small className={styles.live}>
+                    ● Live Sharing is Active (Updating continuously)
+                  </small>
+                  {gpsAccuracy !== null && (
+                    <p style={{ margin: "4px 0 0", fontSize: 10, color: "#70676A" }}>
+                      GPS Accuracy: ±{gpsAccuracy}m · Last updated: {lastGpsUpdate ? formatTimeAgo(lastGpsUpdate) : "Just now"}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <h2 className={styles.sectionTitle}>
+              Group Members ({groupMembers.length})
+            </h2>
+
+            {groupMembers.map((m) => {
+              const liveData = groupLiveLocations.find((l) => l.uid === m.uid);
+              const isStale = liveData ? isLocationStale(liveData.updatedAt) : true;
+              return (
+                <div className={styles.member} key={m.uid}>
+                  <span>{m.displayName.slice(0, 2).toUpperCase()}</span>
+                  <div>
+                    <strong>{m.displayName}</strong>
+                    <small>
+                      {liveData && !isStale
+                        ? "● Live now · Sharing GPS"
+                        : liveData && isStale
+                        ? `Stale GPS (${formatTimeAgo(liveData.updatedAt)})`
+                        : "Location sharing inactive"}
+                    </small>
+                  </div>
+                  {liveData && (
+                    <button
+                      onClick={() => {
+                        setActiveTab("map");
+                      }}
+                    >
+                      View on Map
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        {/* ===================== TAB 4: GROUPS ===================== */}
+        {activeTab === "groups" && (
+          <section className={styles.screen}>
+            <p className={styles.kicker}>MAKE A PLAN TOGETHER</p>
+            <h1>
+              Your <em>groups</em>
+            </h1>
+
+            {groupNotice && (
+              <div style={{ background: "#E8F5E9", color: "#26734D", padding: 10, borderRadius: 8, fontSize: 11, marginBottom: 14, fontWeight: 700 }}>
+                {groupNotice}
+              </div>
+            )}
+
+            {/* Active Group Card */}
+            <div className={styles.groupCard}>
+              <div className={styles.groupArt}>✦</div>
+              <div>
+                <span>{groupMembers.length} MEMBERS</span>
+                <h2>{activeGroup.name}</h2>
+                <p>Invite code: <strong>{activeGroup.inviteCode}</strong></p>
+              </div>
+              <button onClick={() => setInviteModalGroup(activeGroup)} title="Share group invite">
+                QR
+              </button>
+            </div>
+
+            {/* Shared Stops */}
+            <div style={{ background: "#FFF", border: "1px solid #E8DCCB", borderRadius: 14, padding: 14, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", margin: 0, fontSize: 16, color: "#780D19" }}>
+                  Shared Group Stops ({groupStops.length})
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!user) setAuthModalOpen(true);
+                    else addGroupStop(activeGroup.id, selectedPlace, user.uid, groupStops.length);
+                  }}
+                  style={{ background: "#FFF9F0", border: "1px solid #780D19", color: "#780D19", borderRadius: 6, fontSize: 10, fontWeight: 700, padding: "4px 8px", cursor: "pointer" }}
+                >
+                  ＋ Add &quot;{selectedPlace.name.slice(0, 15)}…&quot;
+                </button>
+              </div>
+
+              {groupStops.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 11, color: "#70676A" }}>
+                  No shared stops added yet. Tap above to add your current selected pandal!
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {groupStops.map((stop) => (
+                    <div
+                      key={stop.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "8px 10px",
+                        background: stop.completed ? "#F1F8F4" : "#FFF9F0",
+                        borderRadius: 8,
+                        border: "1px solid #E8DCCB",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={stop.completed}
+                        onChange={(e) => toggleGroupStopCompleted(activeGroup.id, stop.id, e.target.checked)}
+                        style={{ cursor: "pointer" }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong style={{ fontSize: 12, textDecoration: stop.completed ? "line-through" : "none", color: stop.completed ? "#70676A" : "#191516" }}>
+                          {stop.name}
+                        </strong>
+                        <span style={{ fontSize: 10, color: "#70676A", display: "block" }}>
+                          {stop.locality}
+                        </span>
+                      </div>
+                      {stop.completed && (
+                        <span style={{ fontSize: 9, color: "#26734D", fontWeight: 700 }}>
+                          ✓ Done
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Create Group Form */}
+            <form onSubmit={handleCreateGroup} style={{ background: "#FFF", border: "1px solid #E8DCCB", borderRadius: 14, padding: 14, marginBottom: 16 }}>
+              <strong style={{ display: "block", fontSize: 12, marginBottom: 8, color: "#191516" }}>
+                Create a new group
+              </strong>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="text"
+                  required
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="e.g. Saptami Night Explorers"
+                  style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #E8DCCB", fontSize: 11 }}
+                />
+                <button
+                  type="submit"
+                  style={{ background: "#780D19", color: "#FFF", border: "none", borderRadius: 8, padding: "0 14px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                >
+                  Create
+                </button>
+              </div>
+            </form>
+
+            {/* Join Group with Code */}
+            <form onSubmit={handleJoinGroup} style={{ background: "#FFF", border: "1px solid #E8DCCB", borderRadius: 14, padding: 14, marginBottom: 16 }}>
+              <strong style={{ display: "block", fontSize: 12, marginBottom: 8, color: "#191516" }}>
+                Join existing group with invite code
+              </strong>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="text"
+                  required
+                  value={joinCodeInput}
+                  onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                  placeholder="e.g. PUJA26"
+                  maxLength={8}
+                  style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #E8DCCB", fontSize: 11, letterSpacing: 2, fontFamily: "monospace" }}
+                />
+                <button
+                  type="submit"
+                  style={{ background: "#26734D", color: "#FFF", border: "none", borderRadius: 8, padding: "0 14px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                >
+                  Join Group
+                </button>
+              </div>
+            </form>
+
+            {/* Invite Banner */}
+            <div className={styles.invite}>
+              <strong>Invite friends with link or QR code</strong>
+              <p>Invitation links can be revoked at any time. Member live locations are only visible to authorized group members.</p>
+              <button className={styles.secondary} onClick={() => setInviteModalGroup(activeGroup)}>
+                Show Invite QR &amp; Link
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* ===================== TAB 5: PROFILE ===================== */}
+        {activeTab === "profile" && (
+          <section className={styles.screen}>
+            <div className={styles.profileHead}>
+              <div className={styles.profileAvatar}>
+                {(profile?.displayName || user?.displayName || "AM")
+                  .split(" ")
+                  .map((p) => p[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)}
+              </div>
+              <div>
+                <p className={styles.kicker}>
+                  {user ? "AUTHENTICATED DEVOTEE" : "GUEST EXPLORER"}
+                </p>
+                <h1>{profile?.displayName || user?.displayName || "Guest Explorer"}</h1>
+                <span>
+                  {user ? user.email : "Sign in to sync your pujo favourites across devices"}
+                </span>
+              </div>
+            </div>
+
+            {/* Stats Bar */}
+            <div className={styles.stats}>
+              <div>
+                <strong>{favourites.length}</strong>
+                <span>Saved</span>
+              </div>
+              <div>
+                <strong>{visits.length}</strong>
+                <span>Visited</span>
+              </div>
+              <div>
+                <strong>{savedItineraries.length}</strong>
+                <span>Itineraries</span>
+              </div>
+              <div>
+                <strong>{userGroups.length}</strong>
+                <span>Groups</span>
+              </div>
+            </div>
+
+            {/* Saved Pandals List */}
+            {favourites.length > 0 && (
+              <div style={{ background: "#FFF", border: "1px solid #E8DCCB", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+                <strong style={{ display: "block", fontSize: 13, marginBottom: 10, color: "#780D19", fontFamily: "'Playfair Display', serif" }}>
+                  ⭐ Saved Favourite Pandals
+                </strong>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {favourites.map((fav) => (
+                    <div key={fav.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F0EAE1" }}>
+                      <div>
+                        <strong style={{ fontSize: 12, color: "#191516" }}>{fav.locationName}</strong>
+                        <span style={{ fontSize: 10, color: "#70676A", display: "block" }}>{fav.locality}</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const found = locations.find((l) => l.id === fav.locationId);
+                          if (found) {
+                            handleAddToRoute(found);
+                            setActiveTab("routes");
+                          }
+                        }}
+                        style={{ background: "#FFF9F0", border: "1px solid #780D19", color: "#780D19", borderRadius: 6, fontSize: 10, fontWeight: 700, padding: "4px 8px", cursor: "pointer" }}
+                      >
+                        Add to route
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Visit History */}
+            {visits.length > 0 && (
+              <div style={{ background: "#FFF", border: "1px solid #E8DCCB", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+                <strong style={{ display: "block", fontSize: 13, marginBottom: 10, color: "#26734D", fontFamily: "'Playfair Display', serif" }}>
+                  ✓ Completed Visits
+                </strong>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {visits.map((v) => (
+                    <div key={v.id} style={{ padding: "6px 0", borderBottom: "1px solid #F0EAE1" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <strong style={{ fontSize: 12, color: "#191516" }}>{v.locationName}</strong>
+                        <span style={{ fontSize: 10, color: "#26734D", fontWeight: 700 }}>{v.visitedAt}</span>
+                      </div>
+                      {v.notes && <p style={{ margin: "2px 0 0", fontSize: 10, color: "#70676A" }}>{v.notes}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Settings & Auth Buttons */}
+            <div className={styles.settings}>
+              {user ? (
+                <>
+                  <button onClick={() => setActiveTab("map")}>
+                    ♡ Browse and save more pandals <span>›</span>
+                  </button>
+                  <button onClick={() => setAreaModalOpen(true)}>
+                    🗺️ Multi-Area trip planner <span>›</span>
+                  </button>
+                  <button onClick={() => setAiModalOpen(true)}>
+                    ✨ AI Route recommendations <span>›</span>
+                  </button>
+                  <Link
+                    href="/admin"
+                    style={{
+                      padding: 15,
+                      width: "100%",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      color: "#413839",
+                      borderBottom: "1px solid var(--line)",
+                      background: "#FFF",
+                      textDecoration: "none",
+                      fontSize: 12,
+                    }}
+                  >
+                    ⚙ Admin pandal management <span>›</span>
+                  </Link>
+                  <button onClick={logoutUser} style={{ color: "#C62828" }}>
+                    ↪ Sign out of Puja26 <span>›</span>
+                  </button>
+                </>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <Link
+                    href="/login"
+                    style={{
+                      padding: 15,
+                      width: "100%",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      color: "#780D19",
+                      fontWeight: 700,
+                      borderBottom: "1px solid var(--line)",
+                      background: "#FFF",
+                      textDecoration: "none",
+                      fontSize: 12,
+                    }}
+                  >
+                    ↪ User Login page <span>›</span>
+                  </Link>
+                  <button onClick={() => setAuthModalOpen(true)} style={{ color: "#780D19", fontWeight: 700 }}>
+                    ↪ Quick sign in or register <span>›</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Bottom Navigation */}
+        <nav className={styles.nav} aria-label="Main navigation">
+          {NAV_ITEMS.map(([id, glyph, label]) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={activeTab === id ? styles.activeNav : ""}
+            >
+              <Icon>{glyph}</Icon>
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      </section>
+
+      {/* Modals & Drawers */}
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+      />
+
+      <VisitModal
+        isOpen={visitModalOpen}
+        onClose={() => setVisitModalOpen(false)}
+        location={selectedPlace}
+        userId={user?.uid || ""}
+      />
+
+      <ReviewsDrawer
+        isOpen={reviewsDrawerOpen}
+        onClose={() => setReviewsDrawerOpen(false)}
+        location={selectedPlace}
+        user={user ? { uid: user.uid, displayName: profile?.displayName || user.displayName || "Devotee" } : null}
+        onRequestLogin={() => {
+          setReviewsDrawerOpen(false);
+          setAuthModalOpen(true);
+        }}
+      />
+
+      <AIPlannerModal
+        isOpen={aiModalOpen}
+        onClose={() => setAiModalOpen(false)}
+        availableLocations={locations}
+        onApplyRoute={(stops) => {
+          setRouteStops(stops);
+          setActiveTab("routes");
+        }}
+      />
+
+      <AreaPandalSelectorModal
+        isOpen={areaModalOpen}
+        onClose={() => setAreaModalOpen(false)}
+        allLocations={locations}
+        userCoords={userCoords || undefined}
+        onApplyRoute={(stops) => {
+          setRouteStops(stops);
+          setActiveTab("routes");
+        }}
+      />
+
+      <GroupInviteModal
+        isOpen={Boolean(inviteModalGroup)}
+        onClose={() => setInviteModalGroup(null)}
+        group={inviteModalGroup}
+      />
+    </main>
+  );
 }

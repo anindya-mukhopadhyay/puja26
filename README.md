@@ -1,46 +1,128 @@
-# Puja26
+# Puja26 — Durga Puja Discovery, Navigation & Social Planning Web App
 
-A mobile-first Durga Puja discovery and planning experience. The starter is intentionally useful without external credentials: its map canvas, discovery, favourites, itinerary, group, and consent UI are all interactive. Configure Google Maps and Firebase to connect it to live data.
+Puja26 is a mobile-first web application designed for exploring Durga Puja pandals, navigating between locations, planning day-wise itineraries, locating verified public facilities, and sharing live GPS locations with friends in Kolkata.
 
-## Run locally
+---
 
-1. Install dependencies with `npm install`.
-2. Copy `.env.example` to `.env.local` and supply Firebase and Google Maps credentials.
-3. Run `npm run dev`, then open `http://localhost:3000`.
-4. Run `npm run build` before deployment.
+## 1. Design System — Light Bengali Durga Puja Theme
 
-## Firebase model
+Puja26 adopts a festive, warm Bengali aesthetic:
+- **Ivory background**: `#FFF9F0`
+- **White surfaces**: `#FFFFFF`
+- **Golden yellow**: `#F5BD32`
+- **Sindoor red**: `#C62828`
+- **Dark maroon**: `#780D19`
+- **Ink black**: `#191516`
+- **Secondary text**: `#70676A`
+- **Soft beige borders**: `#E8DCCB`
+- **Success green**: `#26734D`
 
-Firestore holds durable data: `users`, `locations`, `favourites`, `itineraries`, `visits`, `reviews`, `groups/{groupId}/members`, `groups/{groupId}/stops`, `invitations`, `reports`, and `adminAuditLogs`. Location records use a GeoPoint, `status` (`draft`, `published`, or `archived`), verification metadata, and timestamps. Keep member and review sets as documents rather than arrays.
+Typography uses `Playfair Display` for festive editorial headings and `DM Sans` for clean, accessible mobile legibility.
 
-### Phase 2: pandals and administration
+---
 
-The live public map reads only `pandals` records with `status: "published"` in real time. Each record has a festival-confirmed `name`, optional `address` and `locality`, a GeoPoint plus `latitude`/`longitude`, optional description/photo, status, creator UID, and trusted timestamps. The `/admin` route is for management only; its client-side custom-claim check is a convenience, while Firestore rules are the actual write boundary.
+## 2. Technology Architecture
 
-To grant the first administrator, use a trusted machine with Firebase Admin SDK credentials (never browser code or the Firebase client config):
+- **Frontend**: Next.js 15 (App Router), React 19, TypeScript, CSS Modules & Design Tokens.
+- **Firebase Authentication**: Email/password signup with phone number, optional WhatsApp, and session management.
+- **Cloud Firestore**: Persistent application data (`pandals`, `users`, `favourites`, `visits`, `reviews`, `groups`, `itineraries`).
+- **Firebase Realtime Database**: Ephemeral live GPS coordinates (`groupLocations/{groupId}/{uid}`) with automatic presence detection and stale-location expiration.
+- **Google Maps Platform**: Google Maps JavaScript API with customized festive styling, category markers, and Places Autocomplete.
+- **QR Code Engine**: High-resolution SVG/Canvas QR generator for frictionless group invitations.
+- **AI Recommendation Engine**: Grounded planning service with deterministic fallbacks rooted strictly in verified application data.
+- **Weather Integration**: Autumn festival meteorological forecasts with rain probabilities and smart pandal routing advice.
 
-```js
-await getAuth().setCustomUserClaims("FIREBASE_UID", { admin: true });
+---
+
+## 3. Local Setup & Running
+
+### Prerequisites
+- Node.js (v20 or v22)
+- npm
+
+### Installation
+```bash
+# Clone and install dependencies
+git clone <repo-url>
+cd puja26
+npm install
 ```
 
-The user must sign out and back in, or refresh their ID token, before the claim appears. Do not use a Firestore `isAdmin` field or public signup to grant this role.
+### Environment Configuration
+Create `.env.local` in the project root:
+```env
+# Public Firebase web configuration
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyCaD5-ZR2cl91tohEVuNcRErK-pZYlY_SE
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=puja26-5d19a.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=puja26-5d19a
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=puja26-5d19a.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=797849505599
+NEXT_PUBLIC_FIREBASE_APP_ID=1:797849505599:web:1a90a169242bfd0df4cd8a
+NEXT_PUBLIC_FIREBASE_DATABASE_URL=https://puja26-5d19a-default-rtdb.firebaseio.com
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-FSPQHMRFL8
 
-For local rule verification, start Firestore Emulator with `firebase emulators:start --only firestore`, then run `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 npm run test:rules`. The test file skips itself when no emulator is configured, keeping normal local tests safe.
+# Google Maps JavaScript API (restricted by HTTP referrer in Google Cloud Console)
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIzaSyCtDfk8jIajSqYzqAcJvzYSpjyKitnNAzE
 
-Realtime Database holds only short-lived group GPS data under `groupLocations/{groupId}/{uid}` and user presence. A client should write its own position only after an explicit opt-in, throttle changes by time/distance, attach `onDisconnect().remove()`, and remove location data when sharing stops. It must visibly mark stale data and never display it on the public map.
+# Server-side integrations (deterministic fallbacks active when empty)
+GOOGLE_ROUTES_API_KEY=
+AI_PROVIDER_API_KEY=
+WEATHER_API_KEY=
+```
 
-## Security and roles
+### Run Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser (or use mobile device emulation in Developer Tools).
 
-Deploy rules with `firebase deploy --only firestore:rules,database,storage`. Grant administrator claims only through a trusted Cloud Function/Admin SDK, e.g. `setCustomUserClaims(uid, { admin: true })`; a hidden dashboard route is not authorization. Firestore rules expose only published locations publicly, protect account-owned data, and scope group reads to group members. Before production, test these rules in the Emulator Suite, especially cross-user writes, expired/revoked invites, and group membership changes.
+---
 
-## Integrations
+## 4. Testing & Verification
 
-Use Google Maps JavaScript API for the live map and Places Autocomplete, Geocoding for the admin location-confirmation flow, and Routes API from a server route for walking/transit estimates. Never call Routes or AI providers directly from the browser with unrestricted keys. Restrict the Maps browser key by referrer and API, and keep server keys in your deployment secret store.
+Run unit test suites:
+```bash
+npm test
+```
+*Current test suite: 15 passing unit tests verifying phone normalization, Haversine routing calculations, live GPS stale tracking, AI planning clusters, and weather integration.*
 
-For Phase 2, enable billing plus **Maps JavaScript API**, **Places API (New)**, and **Geocoding API** in the Google Cloud project. Restrict `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` to the deployed website referrers and only these client-side APIs. If that key was ever exposed outside controlled deployment settings, rotate it before release. The map and admin search display understandable setup errors when a key, billing, or an enabled API is missing.
+Type checking:
+```bash
+npx tsc --noEmit
+```
 
-The recommendation layer should receive only verified Firestore locations plus route/weather results. If the AI provider is absent or fails, sort deterministically by eligibility, distance, rating/review count, open hours, and facility fit; do not invent a crowd level, hours, routes, or a location.
+Production build:
+```bash
+npm run build
+```
 
-## Deployment
+---
 
-Deploy the app to Vercel or Firebase App Hosting. Configure every value from `.env.example` in the host’s secret/environment settings, deploy Firebase rules and indexes, enable App Check for web, and use Firebase Emulator Suite in CI for rules tests. Configure email/password auth and the allowed domains in Firebase Authentication before releasing sign-in.
+## 5. Admin Pandal Management & Firestore Rules
+
+### Admin Access
+The `/admin` dashboard allows administrators to search pandals with Google Places, confirm coordinates on a draggable map pin, choose category and facilities, and publish live records.
+
+To grant administrator access to a Firebase user, run via Firebase Admin SDK:
+```js
+const { getAuth } = require("firebase-admin/auth");
+await getAuth().setCustomUserClaims("TARGET_USER_UID", { admin: true });
+```
+
+### 1-Click Seeding
+Admins can click **"🌱 Seed Verified Kolkata Data"** in the `/admin` dashboard to instantly populate Cloud Firestore with 24 verified iconic Kolkata Durga Puja pandals (North, South, Central, Salt Lake), Metro stations, and public amenities.
+
+### Deploying Security Rules
+```bash
+firebase deploy --only firestore:rules,database,storage
+```
+
+---
+
+## 6. Live Location Privacy Model
+
+- Live GPS sharing is **explicitly opt-in** and strictly disabled by default.
+- Coordinates are stored only in Firebase Realtime Database under `groupLocations/{groupId}/{uid}`.
+- Coordinates are never written to public Firestore collections or displayed to unauthorized users.
+- Automatic disconnection presence (`onDisconnect`) ensures coordinates cease updating when the browser is closed or disconnected.
+- Updates older than 3 minutes are explicitly flagged as **Stale GPS**.

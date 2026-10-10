@@ -1,5 +1,6 @@
-import { GeoPoint, Timestamp, addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { GeoPoint, Timestamp, addDoc, collection, deleteDoc, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { db } from "./firebase";
+import { SEED_LOCATIONS } from "./seedData";
 
 export type PandalStatus = "draft" | "published" | "archived";
 export type Pandal = {
@@ -22,13 +23,68 @@ export type PandalInput = Pick<Pandal, "name" | "address" | "locality" | "latitu
 const toPandal = (snapshot: { id: string; data: () => Record<string, unknown> }): Pandal => {
   const value = snapshot.data();
   const point = value.location as GeoPoint | undefined;
-  return { id: snapshot.id, name: String(value.name || "Unnamed pandal"), address: String(value.address || ""), locality: String(value.locality || ""), latitude: Number(value.latitude ?? point?.latitude), longitude: Number(value.longitude ?? point?.longitude), description: value.description ? String(value.description) : undefined, photoURL: value.photoURL ? String(value.photoURL) : undefined, status: value.status as PandalStatus, createdBy: String(value.createdBy || ""), createdAt: value.createdAt as Timestamp | undefined, updatedAt: value.updatedAt as Timestamp | undefined };
+  return {
+    id: snapshot.id,
+    name: String(value.name || "Unnamed pandal"),
+    address: String(value.address || ""),
+    locality: String(value.locality || ""),
+    latitude: Number(value.latitude ?? point?.latitude),
+    longitude: Number(value.longitude ?? point?.longitude),
+    description: value.description ? String(value.description) : undefined,
+    photoURL: value.photoURL ? String(value.photoURL) : undefined,
+    status: value.status as PandalStatus,
+    createdBy: String(value.createdBy || ""),
+    createdAt: value.createdAt as Timestamp | undefined,
+    updatedAt: value.updatedAt as Timestamp | undefined,
+  };
+};
+
+const getSeedPandals = (): Pandal[] => {
+  return SEED_LOCATIONS.filter((s) => s.category === "Pandal").map((s) => ({
+    id: s.id,
+    name: s.name,
+    address: s.address,
+    locality: s.locality,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    description: s.description,
+    status: "published",
+    createdBy: s.createdBy,
+  }));
 };
 
 export function subscribeToPublishedPandals(onChange: (items: Pandal[]) => void, onError: (message: string) => void) {
-  if (!db) { onChange([]); return () => undefined; }
+  if (!db) {
+    onChange(getSeedPandals());
+    return () => undefined;
+  }
   return onSnapshot(
     query(collection(db, "pandals"), where("status", "==", "published")),
+    (snapshot) => {
+      const items = snapshot.docs.map(toPandal);
+      if (items.length === 0) {
+        onChange(getSeedPandals());
+        return;
+      }
+      items.sort((a, b) => {
+        const timeA = a.updatedAt?.toMillis?.() ?? (a.createdAt?.toMillis?.() ?? 0);
+        const timeB = b.updatedAt?.toMillis?.() ?? (b.createdAt?.toMillis?.() ?? 0);
+        return timeB - timeA;
+      });
+      onChange(items);
+    },
+    (error) => {
+      console.warn("Firestore subscription error; falling back to curated seed pandals:", error);
+      onChange(getSeedPandals());
+      onError(error.message);
+    }
+  );
+}
+
+export function subscribeToAdminPandals(onChange: (items: Pandal[]) => void, onError: (message: string) => void) {
+  if (!db) { onChange([]); return () => undefined; }
+  return onSnapshot(
+    collection(db, "pandals"),
     (snapshot) => {
       const items = snapshot.docs.map(toPandal);
       items.sort((a, b) => {
@@ -38,16 +94,8 @@ export function subscribeToPublishedPandals(onChange: (items: Pandal[]) => void,
       });
       onChange(items);
     },
-    (error) => {
-      console.error("Firestore subscription error:", error);
-      onError(error.message);
-    }
+    (error) => onError(error.message)
   );
-}
-
-export function subscribeToAdminPandals(onChange: (items: Pandal[]) => void, onError: (message: string) => void) {
-  if (!db) { onChange([]); return () => undefined; }
-  return onSnapshot(query(collection(db, "pandals"), orderBy("updatedAt", "desc")), (snapshot) => onChange(snapshot.docs.map(toPandal)), (error) => onError(error.message));
 }
 
 const validCoordinates = (latitude: number, longitude: number) => Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
