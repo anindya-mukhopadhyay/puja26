@@ -10,8 +10,16 @@ import { signOutUser } from "@/lib/auth";
 import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
 import GroupsManager from "@/components/GroupsManager";
 import { getStoredGroups, type PujaGroup } from "@/lib/groups";
+import {
+  getStoredVisited,
+  saveStoredVisited,
+  syncVisitToFirestore,
+  calculateDistanceKm,
+  formatDistance,
+} from "@/lib/visits";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
+type FilterType = Category | "All" | "Visited";
 type Place = {
   id: string;
   name: string;
@@ -21,6 +29,7 @@ type Place = {
   rating?: string;
   reviews?: number;
   distance: string;
+  distanceKm?: number;
   color: string;
   x: number;
   y: number;
@@ -65,13 +74,22 @@ export default function Home() {
   const router = useRouter();
   const [active, setActive] = useState("map");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Category | "All">("All");
+  const [filter, setFilter] = useState<FilterType>("All");
   const [saved, setSaved] = useState<string[]>([]);
+  const [visited, setVisited] = useState<string[]>([]);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [sortByNearest, setSortByNearest] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locationNotice, setLocationNotice] = useState("");
   const [route, setRoute] = useState<Place[]>([]);
   const [sharing, setSharing] = useState(false);
   const [livePandals, setLivePandals] = useState<Pandal[]>([]);
   const [mapDataError, setMapDataError] = useState("");
   const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    setVisited(getStoredVisited());
+  }, []);
 
   useEffect(() => {
     if (!auth) return;
@@ -90,24 +108,45 @@ export default function Home() {
   }, []);
 
   const livePlaces = useMemo<Place[]>(() => {
-    return livePandals.map((pandal, idx) => ({
-      id: pandal.id,
-      name: pandal.name,
-      locality: pandal.locality || pandal.address || "Kolkata",
-      address: pandal.address,
-      category: "Pandal",
-      rating: (4.7 + ((idx % 3) * 0.1)).toFixed(1),
-      reviews: 140 + idx * 35,
-      distance: "Live location",
-      color: "#C62828",
-      x: 50,
-      y: 50,
-      latitude: pandal.latitude,
-      longitude: pandal.longitude,
-      facilities: ["Verified Pandal", "Confirmed Coordinates"],
-      description: pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Official published festival pandal.")
-    }));
-  }, [livePandals]);
+    const list = livePandals.map((pandal, idx) => {
+      const hasCoords = Number.isFinite(pandal.latitude) && Number.isFinite(pandal.longitude);
+      const distKm =
+        hasCoords && userLocation
+          ? calculateDistanceKm(userLocation.lat, userLocation.lng, pandal.latitude, pandal.longitude)
+          : undefined;
+
+      return {
+        id: pandal.id,
+        name: pandal.name,
+        locality: pandal.locality || pandal.address || "Kolkata",
+        address: pandal.address,
+        category: "Pandal" as Category,
+        rating: (4.7 + ((idx % 3) * 0.1)).toFixed(1),
+        reviews: 140 + idx * 35,
+        distance: distKm !== undefined ? formatDistance(distKm) : "Published Pandal",
+        distanceKm: distKm,
+        color: "#C62828",
+        x: 50,
+        y: 50,
+        latitude: pandal.latitude,
+        longitude: pandal.longitude,
+        facilities: ["Verified Pandal", "Confirmed Coordinates"],
+        description:
+          pandal.description || (pandal.address ? `Address: ${pandal.address}` : "Official published festival pandal."),
+      };
+    });
+
+    if (sortByNearest) {
+      list.sort((a, b) => {
+        if (a.distanceKm === undefined && b.distanceKm === undefined) return 0;
+        if (a.distanceKm === undefined) return 1;
+        if (b.distanceKm === undefined) return -1;
+        return a.distanceKm - b.distanceKm;
+      });
+    }
+
+    return list;
+  }, [livePandals, userLocation, sortByNearest]);
 
   const allPlaces = useMemo<Place[]>(() => {
     if (livePlaces.length > 0) {
@@ -138,6 +177,62 @@ export default function Home() {
       setSelected((prev) => prev || civicUtilities[0]);
     }
   }, [livePlaces]);
+
+  useEffect(() => {
+    if (sortByNearest && livePlaces.length > 0) {
+      setSelected(livePlaces[0]);
+    }
+  }, [sortByNearest]);
+
+  const toggleVisited = (id: string) => {
+    setVisited((prev) => {
+      const isAlready = prev.includes(id);
+      const updated = isAlready ? prev.filter((item) => item !== id) : [...prev, id];
+      saveStoredVisited(updated);
+      if (user?.uid) {
+        syncVisitToFirestore(id, !isAlready, user.uid);
+      }
+      return updated;
+    });
+  };
+
+  const handleToggleNearest = () => {
+    if (sortByNearest) {
+      setSortByNearest(false);
+      return;
+    }
+    if (userLocation) {
+      setSortByNearest(true);
+      return;
+    }
+    setLocating(true);
+    setLocationNotice("");
+    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setUserLocation(coords);
+          setSortByNearest(true);
+          setLocating(false);
+        },
+        (err) => {
+          console.warn("Geolocation denied/failed:", err);
+          const fallback = { lat: 22.5726, lng: 88.3639 };
+          setUserLocation(fallback);
+          setSortByNearest(true);
+          setLocating(false);
+          setLocationNotice("Location permission not granted. Distances calculated from central Kolkata.");
+        },
+        { timeout: 8000, enableHighAccuracy: true }
+      );
+    } else {
+      const fallback = { lat: 22.5726, lng: 88.3639 };
+      setUserLocation(fallback);
+      setSortByNearest(true);
+      setLocating(false);
+      setLocationNotice("Geolocation not supported. Distances calculated from central Kolkata.");
+    }
+  };
 
   const toggleLiveSharing = () => {
     if (!sharing) {
@@ -172,7 +267,32 @@ export default function Home() {
     return (name.slice(0, 2) || "AM").toUpperCase();
   }, [user]);
 
-  const visible = useMemo(() => allPlaces.filter((p) => (filter === "All" || p.category === filter) && `${p.name} ${p.locality} ${p.category}`.toLowerCase().includes(query.toLowerCase())), [allPlaces, filter, query]);
+  const visible = useMemo(
+    () =>
+      allPlaces.filter((p) => {
+        const matchesCategory =
+          filter === "All"
+            ? true
+            : filter === "Visited"
+            ? visited.includes(p.id)
+            : p.category === filter;
+        const matchesQuery = `${p.name} ${p.locality} ${p.category}`
+          .toLowerCase()
+          .includes(query.toLowerCase());
+        return matchesCategory && matchesQuery;
+      }),
+    [allPlaces, filter, query, visited]
+  );
+
+  const displayedPandals = useMemo(() => {
+    return livePlaces.filter((p) => {
+      if (filter === "Visited") {
+        return visited.includes(p.id);
+      }
+      return true;
+    });
+  }, [livePlaces, filter, visited]);
+
   const toggleSaved = (id: string) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
   const addToRoute = (place: Place) => setRoute((old) => old.some((p) => p.id === place.id) ? old : [...old, place]);
 
@@ -190,31 +310,83 @@ export default function Home() {
           <button onClick={() => setQuery("")} aria-label="Clear search">×</button>
         </div>
         <div className={styles.chips} role="tablist" aria-label="Place categories">
-          {(["All", "Pandal", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={filter === item ? styles.chipActive : ""}>{item === "All" ? "All places" : item === "Pandal" ? `Puja pandals (${livePandals.length || "Live"})` : item}</button>)}
+          <button
+            onClick={handleToggleNearest}
+            className={sortByNearest ? styles.chipNearestActive : styles.chipNearest}
+            title="Find nearest Durga Puja pandals based on your location"
+          >
+            {locating ? "📍 Locating..." : sortByNearest ? "📍 Nearest (Active ✓)" : "📍 Nearest to me"}
+          </button>
+          {(["All", "Pandal", "Visited", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => (
+            <button
+              key={item}
+              onClick={() => setFilter(item)}
+              className={filter === item ? styles.chipActive : ""}
+            >
+              {item === "All"
+                ? "All places"
+                : item === "Pandal"
+                ? `Puja pandals (${livePandals.length || "Live"})`
+                : item === "Visited"
+                ? `✓ Visited (${visited.length})`
+                : item}
+            </button>
+          ))}
         </div>
         <div className={styles.mapCard}>
           <PujaMap
             pandals={livePandals}
             selectedId={selected?.id}
+            visitedIds={visited}
+            userLocation={userLocation}
             onSelect={(pandal) => {
               const matched = allPlaces.find((p) => p.id === pandal.id);
               setSelected(matched || placeFromPandal(pandal));
             }}
           />
-          <div className={styles.mapLegend}><span><i className={styles.redDot}></i> Published pandals ({livePandals.length})</span><span><i className={styles.greenDot}></i> Live updates</span></div>
+          <div className={styles.mapLegend}>
+            <span><i className={styles.redDot}></i> Pandals ({livePandals.length})</span>
+            <span><i style={{ background: "#2E7D32" }}></i> Visited ({visited.length})</span>
+            {userLocation && <span><i style={{ background: "#1A73E8" }}></i> You</span>}
+          </div>
+          {locationNotice && (
+            <div className={styles.toast}>
+              {locationNotice}
+              <button onClick={() => setLocationNotice("")}>Dismiss</button>
+            </div>
+          )}
           {mapDataError && <div className={styles.toast}>{mapDataError}<button onClick={() => setMapDataError("")}>Dismiss</button></div>}
         </div>
         {selected ? (
-          <article className={styles.placeCard}>
-            <div className={styles.placePhoto}><span>দুর্গা</span></div>
+          <article className={`${styles.placeCard} ${visited.includes(selected.id) ? styles.placeCardVisited : ""}`}>
+            <div className={styles.placePhoto}>
+              <span>{visited.includes(selected.id) ? "✓" : "দুর্গা"}</span>
+            </div>
             <div className={styles.placeInfo}>
               <div className={styles.placeTop}>
-                <div><p className={styles.type}>{selected.category}</p><h2>{selected.name}</h2></div>
+                <div>
+                  <div className={styles.typeBadgeRow}>
+                    <p className={styles.type}>{selected.category}</p>
+                    {visited.includes(selected.id) && (
+                      <span className={styles.visitedBadge}>✓ Visited</span>
+                    )}
+                  </div>
+                  <h2>{selected.name}</h2>
+                </div>
                 <button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button>
               </div>
-              <p className={styles.muted}>{selected.locality} · {selected.distance}</p>
+              <p className={styles.muted}>
+                {selected.locality} · <span className={selected.distanceKm !== undefined ? styles.distanceHighlight : ""}>{selected.distance}</span>
+              </p>
               {selected.rating && <p className={styles.rating}>★ {selected.rating} <span>({selected.reviews} reviews)</span></p>}
               <div className={styles.actions}>
+                <button
+                  className={visited.includes(selected.id) ? styles.visitedBtnActive : styles.visitedBtn}
+                  onClick={() => toggleVisited(selected.id)}
+                  title={visited.includes(selected.id) ? "Marked as visited (click to toggle)" : "Mark pandal as visited"}
+                >
+                  {visited.includes(selected.id) ? "✓ Visited" : "✓ Mark as Visited"}
+                </button>
                 <button className={styles.secondary} onClick={() => addToRoute(selected)}>＋ Add to plan</button>
                 <button className={styles.primary} onClick={() => setActive("routes")}>Directions →</button>
               </div>
@@ -227,23 +399,53 @@ export default function Home() {
           </div>
         )}
         <div className={styles.nearbyHeading}>
-          <div><p className={styles.kicker}>EXPLORE PUJOS</p><h2>Published Pandals</h2></div>
-          <button onClick={() => setFilter("Pandal")}>See all</button>
+          <div>
+            <p className={styles.kicker}>
+              {sortByNearest ? "SORTED BY PROXIMITY" : "EXPLORE PUJOS"}
+            </p>
+            <h2>{sortByNearest ? "Nearest Pandals" : "Published Pandals"}</h2>
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {sortByNearest && (
+              <button className={styles.resetSortBtn} onClick={() => setSortByNearest(false)}>
+                Reset
+              </button>
+            )}
+            <button onClick={() => setFilter("Pandal")}>See all</button>
+          </div>
         </div>
         <div className={styles.nearby}>
-          {allPlaces.filter((p) => p.category === "Pandal").length === 0 ? (
-            <p style={{ fontSize: "12px", color: "var(--muted)", padding: "10px 0" }}>No pandals published yet.</p>
+          {displayedPandals.length === 0 ? (
+            <p style={{ fontSize: "12px", color: "var(--muted)", padding: "10px 0" }}>
+              {filter === "Visited"
+                ? "No visited pandals yet. Mark any pandal as visited to view it here!"
+                : "No pandals published yet."}
+            </p>
           ) : (
-            allPlaces.filter((p) => p.category === "Pandal").map((p) => (
-              <button key={p.id} className={styles.nearbyCard} onClick={() => setSelected(p)}>
-                <div className={styles.tinyPhoto}>✦</div>
-                <strong>{p.name}</strong>
-                <span>★ {p.rating} · {p.locality}</span>
-              </button>
-            ))
+            displayedPandals.map((p) => {
+              const isVisited = visited.includes(p.id);
+              return (
+                <button
+                  key={p.id}
+                  className={`${styles.nearbyCard} ${isVisited ? styles.nearbyCardVisited : ""}`}
+                  onClick={() => setSelected(p)}
+                >
+                  <div className={`${styles.tinyPhoto} ${isVisited ? styles.tinyPhotoVisited : ""}`}>
+                    {isVisited ? "✓" : "✦"}
+                  </div>
+                  {isVisited && <span className={styles.tinyVisitedTag}>✓ Visited</span>}
+                  <strong>{p.name}</strong>
+                  <span>★ {p.rating} · {p.locality}</span>
+                  {p.distanceKm !== undefined && (
+                    <small className={styles.nearbyDistance}>📍 {p.distance}</small>
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       </>}
+
 
       {active === "routes" && <section className={styles.screen}>
         <p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p>
@@ -270,9 +472,13 @@ export default function Home() {
             <div className={styles.timeline}>
               {route.map((p, index) => (
                 <div className={styles.stop} key={p.id}>
-                  <i>{index + 1}</i>
+                  <i className={visited.includes(p.id) ? styles.visitedStopIndex : ""}>
+                    {visited.includes(p.id) ? "✓" : index + 1}
+                  </i>
                   <div>
-                    <strong>{p.name}</strong>
+                    <strong>
+                      {p.name} {visited.includes(p.id) ? <span style={{ color: "#2e7d32", fontSize: "11px" }}>✓</span> : null}
+                    </strong>
                     <span>{p.locality}</span>
                     <small>Stop {index + 1} · {index === 0 ? "Starting point" : `~${index * 35} mins later`}</small>
                   </div>
@@ -372,8 +578,8 @@ export default function Home() {
         </div>
         <div className={styles.stats}>
           <div><strong>{saved.length}</strong><span>Saved</span></div>
-          <div><strong>0</strong><span>Visited</span></div>
-          <div><strong>1</strong><span>Groups</span></div>
+          <div><strong>{visited.length}</strong><span>Visited</span></div>
+          <div><strong>{userGroups.length}</strong><span>Groups</span></div>
         </div>
         <div className={styles.settings}>
           <button>♡ Saved pandals <span>›</span></button>
