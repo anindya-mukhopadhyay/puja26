@@ -8,6 +8,7 @@ import PujaMap from "@/components/PujaMap";
 import { auth, firebaseConfigured } from "@/lib/firebase";
 import { signOutUser } from "@/lib/auth";
 import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
+import GroupsManager from "@/components/GroupsManager";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
 type Place = {
@@ -189,12 +190,72 @@ export default function Home() {
         <div className={styles.timeline}>{route.map((p, index) => <div className={styles.stop} key={p.id}><i>{index + 1}</i><div><strong>{p.name}</strong><span>{p.locality}</span><small>{index === 0 ? "Start at 5:30 PM" : "Arrive about 6:10 PM"}</small></div><button onClick={() => setRoute((r) => r.filter((x) => x.id !== p.id))} aria-label={`Remove ${p.name}`}>×</button></div>)}</div>
         <button className={styles.addStop} onClick={() => setActive("map")}>＋ Add another stop</button>
         <div className={styles.weather}><span>☂</span><div><strong>Rain may arrive after 8 PM</strong><p>Forecast will appear once a weather provider is configured.</p></div></div>
-        <button className={styles.primaryWide}>Open in Google Maps ↗</button>
+        <button className={styles.primaryWide} onClick={() => {
+          if (route.length === 0) {
+            alert("Please add at least one pandal stop to your route first.");
+            return;
+          }
+          const destination = encodeURIComponent(route[route.length - 1].name + ", " + (route[route.length - 1].locality || "Kolkata"));
+          const waypoints = route.slice(0, -1).map(r => encodeURIComponent(r.name + ", " + (r.locality || "Kolkata"))).join("|");
+          window.open(`https://www.google.com/maps/dir/?api=1&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}`, "_blank");
+        }}>Open in Google Maps ↗</button>
       </section>}
 
-      {active === "connect" && <section className={styles.screen}><p className={styles.kicker}>EXPLORE TOGETHER, ON YOUR TERMS</p><h1>Stay in <em>sync.</em></h1><div className={styles.connectCard}><span className={styles.bigIcon}>⌖</span><h2>Share live location</h2><p>Only people in your group can see your location, and only while you choose to share it.</p><button className={sharing ? styles.stopShare : styles.primaryWide} onClick={() => setSharing(!sharing)}>{sharing ? "Stop sharing" : "Start sharing"}</button>{sharing && <small className={styles.live}>● Sharing is on — accuracy and last update will show here.</small>}</div><h2 className={styles.sectionTitle}>With your group</h2><div className={styles.member}><span>SR</span><div><strong>Riya Sen</strong><small>Last seen 4 min ago</small></div><button>Message</button></div></section>}
+      {active === "connect" && <section className={styles.screen}>
+        <p className={styles.kicker}>EXPLORE TOGETHER, ON YOUR TERMS</p>
+        <h1>Stay in <em>sync.</em></h1>
+        <div className={styles.connectCard}>
+          <span className={styles.bigIcon}>⌖</span>
+          <h2>Share live location</h2>
+          <p>Only people in your group can see your location, and only while you choose to share it.</p>
+          <button
+            className={sharing ? styles.stopShare : styles.primaryWide}
+            onClick={() => {
+              if (!sharing) {
+                if ("geolocation" in navigator) {
+                  navigator.geolocation.getCurrentPosition(
+                    () => setSharing(true),
+                    () => setSharing(true)
+                  );
+                } else {
+                  setSharing(true);
+                }
+              } else {
+                setSharing(false);
+              }
+            }}
+          >
+            {sharing ? "Stop sharing" : "Start sharing"}
+          </button>
+          {sharing && <small className={styles.live}>● Live location sharing active — visible to your Pujo 2026 group members.</small>}
+        </div>
+        <h2 className={styles.sectionTitle}>With your group</h2>
+        <div className={styles.member}>
+          <span>RS</span>
+          <div>
+            <strong>Riya Sen</strong>
+            <small>Active 4 min ago · Lake Town</small>
+          </div>
+          <button onClick={() => window.open("https://wa.me/?text=" + encodeURIComponent("Hey! Where are you at for Pujo hopping?"), "_blank")}>
+            Message
+          </button>
+        </div>
+        <button className={styles.secondary} style={{ width: "100%", marginTop: "10px" }} onClick={() => setActive("groups")}>
+          Manage Groups & Members →
+        </button>
+      </section>}
 
-      {active === "groups" && <section className={styles.screen}><p className={styles.kicker}>MAKE A PLAN TOGETHER</p><h1>Your <em>groups</em></h1><div className={styles.groupCard}><div className={styles.groupArt}>✦</div><div><span>4 MEMBERS</span><h2>Pujo 2026</h2><p>Tonight · 2 planned stops</p></div><button>›</button></div><button className={styles.addStop}>＋ Create a group</button><div className={styles.invite}><strong>Invite friends with a link or QR</strong><p>Links can be revoked at any time. Personal details remain private.</p><button className={styles.secondary}>Create invite</button></div></section>}
+      {active === "groups" && (
+        <GroupsManager
+          publishedPandals={livePandals}
+          user={user}
+          onViewRoute={(stops) => {
+            setRoute(stops as Place[]);
+            setActive("routes");
+          }}
+          onNavigateTab={setActive}
+        />
+      )}
 
       {active === "profile" && <section className={styles.screen}>
         <div className={styles.profileHead}>
