@@ -22,6 +22,8 @@ import {
 import {
   getStoredVisited,
   saveStoredVisited,
+  getStoredSaved,
+  saveStoredSaved,
   syncVisitToFirestore,
   calculateDistanceKm,
   formatDistance,
@@ -30,7 +32,7 @@ import { matchesSearchQuery } from "@/lib/search";
 import { ALL_METRO_STATIONS, metroStationToPlace } from "@/lib/metro";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
-type FilterType = Category | "All" | "Visited";
+type FilterType = Category | "All" | "Visited" | "Saved";
 type Place = {
   id: string;
   name: string;
@@ -111,6 +113,7 @@ export default function Home() {
   const [filter, setFilter] = useState<FilterType>("All");
   const [saved, setSaved] = useState<string[]>([]);
   const [visited, setVisited] = useState<string[]>([]);
+  const [profileView, setProfileView] = useState<"menu" | "saved" | "visited">("menu");
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [sortByNearest, setSortByNearest] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -135,8 +138,15 @@ export default function Home() {
 
   useEffect(() => {
     setVisited(getStoredVisited());
+    setSaved(getStoredSaved());
     setRoute(getStoredRoute());
   }, []);
+
+  useEffect(() => {
+    if (active !== "profile") {
+      setProfileView("menu");
+    }
+  }, [active]);
 
   useEffect(() => {
     if (!routeToast) return;
@@ -207,6 +217,18 @@ export default function Home() {
     }
     return civicUtilities;
   }, [livePlaces]);
+
+  const savedPlaces = useMemo<Place[]>(() => {
+    return saved
+      .map((id) => allPlaces.find((p) => p.id === id))
+      .filter((p): p is Place => Boolean(p));
+  }, [saved, allPlaces]);
+
+  const visitedPlaces = useMemo<Place[]>(() => {
+    return visited
+      .map((id) => allPlaces.find((p) => p.id === id))
+      .filter((p): p is Place => Boolean(p));
+  }, [visited, allPlaces]);
 
   const [selected, setSelected] = useState<Place | null>(null);
   const [userGroups, setUserGroups] = useState<PujaGroup[]>([]);
@@ -491,9 +513,11 @@ export default function Home() {
 
   const displayedPlaces = useMemo(() => {
     return allPlaces.filter((p) => {
-      // 1. Filter by category or visited
+      // 1. Filter by category, visited, or saved
       if (filter === "Visited") {
         if (!visited.includes(p.id)) return false;
+      } else if (filter === "Saved") {
+        if (!saved.includes(p.id)) return false;
       } else if (filter !== "All") {
         if (p.category !== filter) return false;
       }
@@ -505,7 +529,7 @@ export default function Home() {
 
       return true;
     });
-  }, [allPlaces, filter, visited, query]);
+  }, [allPlaces, filter, visited, saved, query]);
 
   const displayedPandals = useMemo(() => {
     const list = [...displayedPlaces];
@@ -543,7 +567,13 @@ export default function Home() {
     }
   }, [query, displayedPandals, selected]);
 
-  const toggleSaved = (id: string) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
+  const toggleSaved = (id: string) => {
+    setSaved((old) => {
+      const updated = old.includes(id) ? old.filter((item) => item !== id) : [...old, id];
+      saveStoredSaved(updated);
+      return updated;
+    });
+  };
 
   const toggleRoute = (place: Place) => {
     setRoute((prev) => {
@@ -610,7 +640,7 @@ export default function Home() {
           >
             {locating ? "📍 Locating..." : sortByNearest ? "📍 Nearest (Active ✓)" : "📍 Nearest to me"}
           </button>
-          {(["All", "Pandal", "Visited", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => (
+          {(["All", "Pandal", "Saved", "Visited", "Metro", "Food", "Toilet", "Medical", "Parking"] as const).map((item) => (
             <button
               key={item}
               onClick={() => setFilter(item)}
@@ -620,6 +650,8 @@ export default function Home() {
                 ? "All places"
                 : item === "Pandal"
                 ? `Puja pandals (${livePandals.length || "Live"})`
+                : item === "Saved"
+                ? `★ Saved (${saved.length})`
                 : item === "Visited"
                 ? `✓ Visited (${visited.length})`
                 : item === "Metro"
@@ -776,6 +808,8 @@ export default function Home() {
                 ? `Results for "${query}" (${displayedPandals.length})`
                 : sortByNearest
                 ? "Nearest Pandals"
+                : filter === "Saved"
+                ? `Saved Favorite Pandals (${displayedPandals.length})`
                 : filter === "Visited"
                 ? `Visited Pandals (${displayedPandals.length})`
                 : filter !== "All"
@@ -1330,36 +1364,323 @@ export default function Home() {
       )}
 
       {active === "profile" && <section className={styles.screen}>
-        <div className={styles.profileHead}>
-          <div className={styles.profileAvatar}>{userInitials}</div>
-          <div>
-            <p className={styles.kicker}>{user ? "SIGNED IN USER" : "GUEST EXPLORER"}</p>
-            <h1>{user ? (user.displayName || user.email?.split("@")[0] || "Explorer") : "Guest User"}</h1>
-            <span>{user ? `● ${user.email}` : "Local visitor mode"}</span>
+        {profileView === "menu" && (
+          <>
+            <div className={styles.profileHead}>
+              <div className={styles.profileAvatar}>{userInitials}</div>
+              <div>
+                <p className={styles.kicker}>{user ? "SIGNED IN USER" : "GUEST EXPLORER"}</p>
+                <h1>{user ? (user.displayName || user.email?.split("@")[0] || "Explorer") : "Guest User"}</h1>
+                <span>{user ? `● ${user.email}` : "Local visitor mode"}</span>
+              </div>
+            </div>
+            <div className={styles.stats}>
+              <button
+                type="button"
+                className={styles.statBtn}
+                onClick={() => setProfileView("saved")}
+                title="View Saved Favorite Pandals"
+              >
+                <strong>{saved.length}</strong>
+                <span>Saved ⭐</span>
+              </button>
+              <button
+                type="button"
+                className={styles.statBtn}
+                onClick={() => setProfileView("visited")}
+                title="View Visited Pandals"
+              >
+                <strong>{visited.length}</strong>
+                <span>Visited ✓</span>
+              </button>
+              <button
+                type="button"
+                className={styles.statBtn}
+                onClick={() => setActive("groups")}
+                title="View Festival Groups"
+              >
+                <strong>{userGroups.length}</strong>
+                <span>Groups 👥</span>
+              </button>
+            </div>
+            <div className={styles.settings}>
+              <button type="button" onClick={() => setProfileView("saved")}>
+                ⭐ Saved pandals (Favorites) ({saved.length}) <span>›</span>
+              </button>
+              <button type="button" onClick={() => setProfileView("visited")}>
+                ◷ Visit history ({visited.length}) <span>›</span>
+              </button>
+              <button type="button" onClick={() => setActive("routes")}>
+                ⌁ Route Itinerary ({route.length} stops) <span>›</span>
+              </button>
+              <button type="button" onClick={() => setActive("groups")}>
+                👥 Festival Groups ({userGroups.length}) <span>›</span>
+              </button>
+              {user ? (
+                <button type="button" onClick={async () => { await signOutUser(); }} style={{ color: "#a22525", fontWeight: 700 }}>
+                  ↪ Sign out <span>›</span>
+                </button>
+              ) : (
+                <button type="button" onClick={() => router.push("/login")} style={{ fontWeight: 700, color: "#780d19" }}>
+                  ↪ Sign in or Create Account to sync <span>›</span>
+                </button>
+              )}
+              <button type="button" onClick={() => router.push("/admin/login")}>
+                ✦ Organizer & Admin Portal <span>›</span>
+              </button>
+            </div>
+          </>
+        )}
+
+        {profileView === "saved" && (
+          <div className={styles.subviewWrap}>
+            <div className={styles.subviewHeader}>
+              <button
+                type="button"
+                className={styles.backBtn}
+                onClick={() => setProfileView("menu")}
+                aria-label="Back to Profile"
+              >
+                ← Back to Profile
+              </button>
+              <div className={styles.subviewTitleRow}>
+                <div>
+                  <h1 className={styles.subviewTitle}>Saved Pandals ⭐</h1>
+                  <p className={styles.subviewSubtitle}>
+                    Your bookmarked favorite pandals ({savedPlaces.length})
+                  </p>
+                </div>
+                {savedPlaces.length > 0 && (
+                  <button
+                    type="button"
+                    className={styles.clearAllBtn}
+                    onClick={() => {
+                      if (window.confirm("Remove all saved pandals from your list?")) {
+                        setSaved([]);
+                        saveStoredSaved([]);
+                      }
+                    }}
+                    title="Remove all saved pandals"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {savedPlaces.length === 0 ? (
+              <div className={styles.savedEmpty}>
+                <div className={styles.savedEmptyIcon}>⭐</div>
+                <h3>No saved pandals yet</h3>
+                <p>
+                  You haven&apos;t added any favorite pandals yet. Browse the map and tap the star (☆) button on any pandal card to save it here for fast access.
+                </p>
+                <button
+                  type="button"
+                  className={styles.primaryWide}
+                  onClick={() => {
+                    setActive("map");
+                    setProfileView("menu");
+                  }}
+                >
+                  Explore Pandals on Map →
+                </button>
+              </div>
+            ) : (
+              <div className={styles.savedList}>
+                {savedPlaces.map((pandal) => {
+                  const isInRoute = route.some((r) => r.id === pandal.id);
+                  const isPandalVisited = visited.includes(pandal.id);
+
+                  return (
+                    <article key={pandal.id} className={styles.savedCard}>
+                      <div className={styles.savedCardTop}>
+                        <div className={styles.savedCardPhoto}>
+                          <span>{isPandalVisited ? "✓" : pandal.category === "Metro" ? "M" : "দুর্গা"}</span>
+                        </div>
+                        <div className={styles.savedCardInfo}>
+                          <div className={styles.savedCardMeta}>
+                            <span className={styles.savedTypeBadge}>{pandal.category}</span>
+                            {isPandalVisited && (
+                              <span className={styles.savedVisitedBadge}>✓ Visited</span>
+                            )}
+                            {isInRoute && (
+                              <span className={styles.savedRouteBadge}>
+                                In Route (#{route.findIndex((r) => r.id === pandal.id) + 1})
+                              </span>
+                            )}
+                          </div>
+                          <h2 className={styles.savedCardName}>{pandal.name}</h2>
+                          <p className={styles.savedCardLocality}>
+                            {pandal.locality || pandal.address || "Kolkata"}
+                          </p>
+                          {pandal.rating && (
+                            <p className={styles.savedCardRating}>
+                              ★ {pandal.rating} <span>({pandal.reviews || 100} reviews)</span>
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.unsaveBtn}
+                          onClick={() => toggleSaved(pandal.id)}
+                          title="Remove from saved favorites"
+                          aria-label="Remove from saved"
+                        >
+                          ★
+                        </button>
+                      </div>
+
+                      <div className={styles.savedCardActions}>
+                        <button
+                          type="button"
+                          className={styles.savedActionPrimary}
+                          onClick={() => {
+                            setSelected(pandal);
+                            setActive("map");
+                            setProfileView("menu");
+                          }}
+                        >
+                          ⌖ View on Map
+                        </button>
+                        <button
+                          type="button"
+                          className={isInRoute ? styles.savedActionRouteActive : styles.savedActionSecondary}
+                          onClick={() => toggleRoute(pandal)}
+                        >
+                          {isInRoute ? "✓ In Route" : "＋ Add to Route"}
+                        </button>
+                        <button
+                          type="button"
+                          className={isPandalVisited ? styles.savedActionVisitedActive : styles.savedActionSecondary}
+                          onClick={() => toggleVisited(pandal.id)}
+                        >
+                          {isPandalVisited ? "✓ Visited" : "Mark Visited"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.savedActionSecondary}
+                          onClick={() => openPandalDirections(pandal)}
+                        >
+                          🧭 Directions
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-        <div className={styles.stats}>
-          <div><strong>{saved.length}</strong><span>Saved</span></div>
-          <div><strong>{visited.length}</strong><span>Visited</span></div>
-          <div><strong>{userGroups.length}</strong><span>Groups</span></div>
-        </div>
-        <div className={styles.settings}>
-          <button>♡ Saved pandals <span>›</span></button>
-          <button>◷ Visit history <span>›</span></button>
-          <button>⚙ Account & privacy <span>›</span></button>
-          {user ? (
-            <button onClick={async () => { await signOutUser(); }} style={{ color: "#a22525", fontWeight: 700 }}>
-              ↪ Sign out <span>›</span>
-            </button>
-          ) : (
-            <button onClick={() => router.push("/login")} style={{ fontWeight: 700, color: "#780d19" }}>
-              ↪ Sign in or Create Account to sync <span>›</span>
-            </button>
-          )}
-          <button onClick={() => router.push("/admin/login")}>
-            ✦ Organizer & Admin Portal <span>›</span>
-          </button>
-        </div>
+        )}
+
+        {profileView === "visited" && (
+          <div className={styles.subviewWrap}>
+            <div className={styles.subviewHeader}>
+              <button
+                type="button"
+                className={styles.backBtn}
+                onClick={() => setProfileView("menu")}
+                aria-label="Back to Profile"
+              >
+                ← Back to Profile
+              </button>
+              <div className={styles.subviewTitleRow}>
+                <div>
+                  <h1 className={styles.subviewTitle}>Visit History ✓</h1>
+                  <p className={styles.subviewSubtitle}>
+                    Pandals you have marked as visited ({visitedPlaces.length})
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {visitedPlaces.length === 0 ? (
+              <div className={styles.savedEmpty}>
+                <div className={styles.savedEmptyIcon}>⛩️</div>
+                <h3>No pandals marked visited yet</h3>
+                <p>
+                  As you visit pandals during Durga Puja, tap &quot;Mark as Visited&quot; to keep track of your journey!
+                </p>
+                <button
+                  type="button"
+                  className={styles.primaryWide}
+                  onClick={() => {
+                    setActive("map");
+                    setProfileView("menu");
+                  }}
+                >
+                  Explore Pandals →
+                </button>
+              </div>
+            ) : (
+              <div className={styles.savedList}>
+                {visitedPlaces.map((pandal) => {
+                  const isInRoute = route.some((r) => r.id === pandal.id);
+
+                  return (
+                    <article key={pandal.id} className={styles.savedCard}>
+                      <div className={styles.savedCardTop}>
+                        <div className={styles.savedCardPhoto} style={{ background: "linear-gradient(145deg, #43a047, #1b5e20)" }}>
+                          <span>✓</span>
+                        </div>
+                        <div className={styles.savedCardInfo}>
+                          <div className={styles.savedCardMeta}>
+                            <span className={styles.savedVisitedBadge}>✓ Visited</span>
+                            <span className={styles.savedTypeBadge}>{pandal.category}</span>
+                            {isInRoute && (
+                              <span className={styles.savedRouteBadge}>
+                                In Route (#{route.findIndex((r) => r.id === pandal.id) + 1})
+                              </span>
+                            )}
+                          </div>
+                          <h2 className={styles.savedCardName}>{pandal.name}</h2>
+                          <p className={styles.savedCardLocality}>
+                            {pandal.locality || pandal.address || "Kolkata"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className={styles.savedCardActions}>
+                        <button
+                          type="button"
+                          className={styles.savedActionPrimary}
+                          onClick={() => {
+                            setSelected(pandal);
+                            setActive("map");
+                            setProfileView("menu");
+                          }}
+                        >
+                          ⌖ View on Map
+                        </button>
+                        <button
+                          type="button"
+                          className={isInRoute ? styles.savedActionRouteActive : styles.savedActionSecondary}
+                          onClick={() => toggleRoute(pandal)}
+                        >
+                          {isInRoute ? "✓ In Route" : "＋ Add to Route"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.savedActionVisitedActive}
+                          onClick={() => toggleVisited(pandal.id)}
+                        >
+                          Remove from Visited
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.savedActionSecondary}
+                          onClick={() => openPandalDirections(pandal)}
+                        >
+                          🧭 Directions
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </section>}
 
       {routeToast && (

@@ -2,6 +2,7 @@ import { doc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
 const STORAGE_KEY = "puja26_visited_pandals_v1";
+const SAVED_STORAGE_KEY = "puja26_saved_pandals_v1";
 
 export function getStoredVisited(): string[] {
   if (typeof window === "undefined") return [];
@@ -21,6 +22,27 @@ export function saveStoredVisited(visitedIds: string[]): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(visitedIds));
   } catch (err) {
     console.error("Failed to save visited pandals to localStorage:", err);
+  }
+}
+
+export function getStoredSaved(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SAVED_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredSaved(savedIds: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify(savedIds));
+  } catch (err) {
+    console.error("Failed to save saved pandals to localStorage:", err);
   }
 }
 
