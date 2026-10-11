@@ -87,7 +87,8 @@ export default function PujaMap({
   const metroMarkersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
   const userCircleRef = useRef<google.maps.Circle | null>(null);
-  const initialCenteringDoneRef = useRef(false);
+  const userManuallySelectedRef = useRef(false);
+  const hasFittedFallbackBoundsRef = useRef(false);
   const prevSelectedIdRef = useRef<string | undefined>(selectedId);
   const [showMetroLines, setShowMetroLines] = useState(showMetro ?? true);
   const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyCtDfk8jIajSqYzqAcJvzYSpjyKitnNAzE";
@@ -105,7 +106,7 @@ export default function PujaMap({
         const initialCenter = pin || userLocation || KOLKATA;
         const map = new google.maps.Map(elementRef.current, {
           center: initialCenter,
-          zoom: pin ? 15 : userLocation ? 14 : 12,
+          zoom: pin ? 15 : userLocation ? 15 : 12,
           styles: mapStyles,
           mapTypeControl: false,
           streetViewControl: false,
@@ -155,35 +156,34 @@ export default function PujaMap({
       userMarkerRef.current = new google.maps.Marker({
         position: userLocation,
         map,
-        title: "Your location",
-        zIndex: 50,
+        title: "Your current location",
+        zIndex: 100,
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 9,
+          scale: 10,
           fillColor: "#1A73E8",
           fillOpacity: 1,
           strokeColor: "#FFFFFF",
-          strokeWeight: 3.5,
+          strokeWeight: 4,
         },
       });
 
       userCircleRef.current = new google.maps.Circle({
         strokeColor: "#1A73E8",
-        strokeOpacity: 0.3,
+        strokeOpacity: 0.35,
         strokeWeight: 1.5,
         fillColor: "#1A73E8",
-        fillOpacity: 0.12,
+        fillOpacity: 0.14,
         map,
         center: userLocation,
-        radius: 150,
-        zIndex: 49,
+        radius: 180,
+        zIndex: 99,
       });
 
-      // Auto-center squarely on user's current location upon reload or detection
-      if (!initialCenteringDoneRef.current && !pin) {
+      // User location takes 1st priority: center map squarely on user
+      if (!userManuallySelectedRef.current && !pin) {
         map.setCenter(userLocation);
-        map.setZoom(14);
-        initialCenteringDoneRef.current = true;
+        map.setZoom(15);
       }
     }
   }, [userLocation, state, pin]);
@@ -292,7 +292,10 @@ export default function PujaMap({
           strokeWeight: isSelected ? 4 : 2,
         },
       });
-      marker.addListener("click", () => onSelect?.(pandal as any));
+      marker.addListener("click", () => {
+        userManuallySelectedRef.current = true;
+        onSelect?.(pandal as any);
+      });
       return marker;
     });
 
@@ -300,11 +303,11 @@ export default function PujaMap({
     prevSelectedIdRef.current = selectedId;
 
     // Only pan to selected pandal if user deliberately clicked / selected another pandal
-    if (selectedId && selectedId !== prevSelectedId) {
+    if (selectedId && selectedId !== prevSelectedId && userManuallySelectedRef.current) {
       const active = validPandals.find((p) => p.id === selectedId);
       if (active) {
         map.panTo({ lat: active.latitude, lng: active.longitude });
-        if (validPandals.length === 1) {
+        if (validPandals.length === 1 || (map.getZoom() && map.getZoom()! < 14)) {
           map.setZoom(15);
         }
       } else {
@@ -316,8 +319,10 @@ export default function PujaMap({
           }
         }
       }
-    } else if (!userLocation && validPandals.length > 0 && !pin && !initialCenteringDoneRef.current) {
-      // If user's GPS is not available at all, fit bounds to show pandals
+    } else if (!selectedId) {
+      userManuallySelectedRef.current = false;
+    } else if (!userLocation && validPandals.length > 0 && !pin && !hasFittedFallbackBoundsRef.current && !selectedId) {
+      // If user's GPS is not available at all, fit bounds once to show pandals
       const bounds = new google.maps.LatLngBounds();
       validPandals.forEach((p) => {
         bounds.extend({ lat: p.latitude, lng: p.longitude });
@@ -325,7 +330,7 @@ export default function PujaMap({
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds, 60);
       }
-      initialCenteringDoneRef.current = true;
+      hasFittedFallbackBoundsRef.current = true;
     }
   }, [pandals, selectedId, onSelect, state, pin, visitedIds, userLocation, showMetroLines]);
 
@@ -519,9 +524,10 @@ export default function PujaMap({
   const recenter = () => {
     const map = mapRef.current;
     if (!map) return;
+    userManuallySelectedRef.current = false;
     if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
       map.panTo(userLocation);
-      map.setZoom(14);
+      map.setZoom(15);
     } else {
       map.panTo(pin || KOLKATA);
       map.setZoom(pin ? 15 : 13);

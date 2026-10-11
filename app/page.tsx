@@ -151,17 +151,31 @@ export default function Home() {
 
     // Automatically request fresh current GPS position upon reload/mount
     if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      const handlePos = (pos: GeolocationPosition) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserLocation(coords);
+        saveStoredUserLocation(coords);
+      };
+
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setUserLocation(coords);
-          saveStoredUserLocation(coords);
-        },
+        handlePos,
         (err) => {
           console.warn("Auto-geolocation on load:", err);
         },
-        { timeout: 10000, enableHighAccuracy: true, maximumAge: 60000 }
+        { timeout: 10000, enableHighAccuracy: true, maximumAge: 0 }
       );
+
+      const watchId = navigator.geolocation.watchPosition(
+        handlePos,
+        (err) => {
+          console.warn("Auto-geolocation watch:", err);
+        },
+        { timeout: 15000, enableHighAccuracy: true, maximumAge: 0 }
+      );
+
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+      };
     }
   }, []);
 
@@ -264,23 +278,14 @@ export default function Home() {
   const activeGroup = userGroups.length > 0 ? userGroups[0] : null;
 
   useEffect(() => {
+    // Only preserve existing valid selection if it still exists; never force-select a pandal on initial load
     if (livePlaces.length > 0) {
       setSelected((prev) => {
-        if (!prev || !livePlaces.some((p) => p.id === prev.id)) {
-          return livePlaces[0];
-        }
-        return prev;
+        if (!prev) return null;
+        return livePlaces.some((p) => p.id === prev.id) ? prev : null;
       });
-    } else if (civicUtilities.length > 0) {
-      setSelected((prev) => prev || civicUtilities[0]);
     }
   }, [livePlaces]);
-
-  useEffect(() => {
-    if (sortByNearest && livePlaces.length > 0) {
-      setSelected(livePlaces[0]);
-    }
-  }, [sortByNearest]);
 
   const toggleVisited = (id: string) => {
     setVisited((prev) => {
@@ -751,7 +756,10 @@ export default function Home() {
                   </div>
                   <h2>{selected.name}</h2>
                 </div>
-                <button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <button className={saved.includes(selected.id) ? styles.saved : ""} onClick={() => toggleSaved(selected.id)} aria-label="Save location">{saved.includes(selected.id) ? "★" : "☆"}</button>
+                  <button onClick={() => setSelected(null)} aria-label="Close card" title="Close" style={{ border: 0, background: "none", fontSize: "17px", cursor: "pointer", color: "#8a7b7a", padding: "0 4px", lineHeight: 1 }}>✕</button>
+                </div>
               </div>
               <p className={styles.muted}>
                 {selected.locality} · <span className={selected.distanceKm !== undefined ? styles.distanceHighlight : ""}>{selected.distance}</span>
