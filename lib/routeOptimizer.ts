@@ -139,6 +139,97 @@ export function findNearestPandal(
 }
 
 /**
+ * Gets the #1 best pandal in a specific area based on verified ratings and review engagement
+ */
+export function getBestPandalInArea(area: PujoArea, allPandals: LocationItem[]): LocationItem | null {
+  const pandals = getPandalsInArea(area, allPandals);
+  if (pandals.length === 0) return null;
+  const sorted = [...pandals].sort(
+    (a, b) => (b.rating || 4.5) * (b.reviewCount || 10) - (a.rating || 4.5) * (a.reviewCount || 10)
+  );
+  return sorted[0];
+}
+
+/**
+ * Returns structured best pandals and runners-up for all major Kolkata areas
+ */
+export function getBestPandalsByAllLocations(allPandals: LocationItem[]): {
+  area: PujoArea;
+  label: string;
+  bestPandal: LocationItem;
+  runnersUp: LocationItem[];
+}[] {
+  const areas: PujoArea[] = ["North Kolkata", "South Kolkata", "Central Kolkata", "Salt Lake & East"];
+  const results: {
+    area: PujoArea;
+    label: string;
+    bestPandal: LocationItem;
+    runnersUp: LocationItem[];
+  }[] = [];
+
+  for (const area of areas) {
+    const areaPandals = autoSuggestPandalsForArea(area, allPandals, 4);
+    if (areaPandals.length > 0) {
+      results.push({
+        area,
+        label: area,
+        bestPandal: areaPandals[0],
+        runnersUp: areaPandals.slice(1),
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Finds top N nearest pandals to the user's current GPS position, sorted by distance
+ */
+export function findNearestPandals(
+  currentLat: number,
+  currentLng: number,
+  allPandals: LocationItem[],
+  limit = 5
+): { pandal: LocationItem; distanceKm: number }[] {
+  const pandals = allPandals.filter((p) => p.category === "Pandal");
+  return pandals
+    .map((pandal) => ({
+      pandal,
+      distanceKm: Number(
+        calculateDistanceKm(currentLat, currentLng, pandal.latitude, pandal.longitude).toFixed(1)
+      ),
+    }))
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, limit);
+}
+
+/**
+ * Finds the user's current area and the best pandal in that area
+ */
+export function getBestPandalNearLocation(
+  currentLat: number,
+  currentLng: number,
+  allPandals: LocationItem[]
+): { pandal: LocationItem; area: PujoArea; distanceKm: number } | null {
+  const nearest = findNearestPandal(currentLat, currentLng, allPandals);
+  if (!nearest) return null;
+
+  const area = classifyArea(nearest.pandal);
+  const bestInArea = getBestPandalInArea(area, allPandals);
+  if (!bestInArea) return null;
+
+  const distanceKm = Number(
+    calculateDistanceKm(currentLat, currentLng, bestInArea.latitude, bestInArea.longitude).toFixed(1)
+  );
+
+  return {
+    pandal: bestInArea,
+    area,
+    distanceKm,
+  };
+}
+
+/**
  * Calculates total route distance in km
  */
 function totalPathDistance(stops: LocationItem[]): number {

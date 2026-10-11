@@ -201,6 +201,36 @@ describe("Multi-Area Planning & Route Optimization", () => {
       expect(optimized.some((o) => o.id === p.id)).toBe(true);
     });
   });
+
+  it("finds the #1 best pandal in each specific location / area", async () => {
+    const { getBestPandalInArea, getBestPandalsByAllLocations } = await import("../lib/routeOptimizer");
+
+    const northBest = getBestPandalInArea("North Kolkata", SEED_LOCATIONS);
+    expect(northBest).not.toBeNull();
+    expect(northBest?.category).toBe("Pandal");
+    expect(northBest?.rating).toBeGreaterThanOrEqual(4.7);
+
+    const southBest = getBestPandalInArea("South Kolkata", SEED_LOCATIONS);
+    expect(southBest).not.toBeNull();
+    expect(southBest?.category).toBe("Pandal");
+
+    const allLocationsBest = getBestPandalsByAllLocations(SEED_LOCATIONS);
+    expect(allLocationsBest.length).toBe(4);
+    expect(allLocationsBest.every((item) => Boolean(item.bestPandal))).toBe(true);
+  });
+
+  it("finds multiple nearest pandals ordered by ascending distance", async () => {
+    const { findNearestPandals } = await import("../lib/routeOptimizer");
+    // Coordinates near Lake Town (22.6000, 88.4020)
+    const list = findNearestPandals(22.6000, 88.4020, SEED_LOCATIONS, 4);
+
+    expect(list.length).toBe(4);
+    expect(list[0].pandal.name).toContain("Sreebhumi");
+    expect(list[0].distanceKm).toBeLessThanOrEqual(list[1].distanceKm);
+    expect(list[1].distanceKm).toBeLessThanOrEqual(list[2].distanceKm);
+    expect(list[2].distanceKm).toBeLessThanOrEqual(list[3].distanceKm);
+  });
 });
+
 
 

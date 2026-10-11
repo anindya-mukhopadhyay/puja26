@@ -10,11 +10,13 @@ import ReviewsDrawer from "@/components/ReviewsDrawer";
 import AIPlannerModal from "@/components/AIPlannerModal";
 import GroupInviteModal from "@/components/GroupInviteModal";
 import AreaPandalSelectorModal from "@/components/AreaPandalSelectorModal";
+import BestInLocationModal from "@/components/BestInLocationModal";
+import NearestPandalModal from "@/components/NearestPandalModal";
 import { useAuth, logoutUser } from "@/lib/auth";
 import { subscribeToPublishedLocations } from "@/lib/locations";
 import { SEED_LOCATIONS } from "@/lib/seedData";
 import { fetchGooglePlaceInfo, type GooglePlaceDetails } from "@/lib/googlePlaces";
-import { findNearestPandal } from "@/lib/routeOptimizer";
+import { findNearestPandal, getBestPandalInArea, classifyArea } from "@/lib/routeOptimizer";
 import {
   startSharingLocation,
   stopSharingLocation,
@@ -156,6 +158,8 @@ export default function Home() {
   const [reviewsDrawerOpen, setReviewsDrawerOpen] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [areaModalOpen, setAreaModalOpen] = useState(false);
+  const [bestInLocationModalOpen, setBestInLocationModalOpen] = useState(false);
+  const [nearestPandalModalOpen, setNearestPandalModalOpen] = useState(false);
   const [inviteModalGroup, setInviteModalGroup] = useState<Group | null>(null);
 
   // Subscribe to published locations
@@ -620,7 +624,41 @@ export default function Home() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, zIndex: 1 }}>
                 <div className={styles.diya}>🪔</div>
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={() => setNearestPandalModalOpen(true)}
+                    style={{
+                      background: "#FFF",
+                      color: "#C62828",
+                      border: "none",
+                      borderRadius: 99,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    🧭 Nearest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBestInLocationModalOpen(true)}
+                    style={{
+                      background: "#F5BD32",
+                      color: "#191516",
+                      border: "none",
+                      borderRadius: 99,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                    }}
+                  >
+                    🏆 Best in Area
+                  </button>
                   <button
                     type="button"
                     onClick={() => setAreaModalOpen(true)}
@@ -636,14 +674,14 @@ export default function Home() {
                       boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
                     }}
                   >
-                    🗺️ Select Areas
+                    🗺️ Areas
                   </button>
                   <button
                     type="button"
                     onClick={() => setAiModalOpen(true)}
                     style={{
-                      background: "#F5BD32",
-                      color: "#191516",
+                      background: "rgba(255, 255, 255, 0.95)",
+                      color: "#70676A",
                       border: "none",
                       borderRadius: 99,
                       fontSize: 10,
@@ -653,7 +691,7 @@ export default function Home() {
                       boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
                     }}
                   >
-                    ✨ AI Curator
+                    ✨ AI
                   </button>
                 </div>
               </div>
@@ -833,6 +871,22 @@ export default function Home() {
                   <div>
                     <div className={styles.typeBadgeRow}>
                       <p className={styles.type}>{selectedPlace.category}</p>
+                      {getBestPandalInArea(classifyArea(selectedPlace), locations)?.id === selectedPlace.id && (
+                        <span
+                          className={styles.visitedBadge}
+                          style={{ background: "#FFF8E1", color: "#F57F17", borderColor: "#FFE082" }}
+                        >
+                          🏆 Best in {classifyArea(selectedPlace)}
+                        </span>
+                      )}
+                      {userCoords && findNearestPandal(userCoords.lat, userCoords.lng, locations)?.pandal.id === selectedPlace.id && (
+                        <span
+                          className={styles.visitedBadge}
+                          style={{ background: "#FFEBEE", color: "#C62828", borderColor: "#FFCDD2" }}
+                        >
+                          📍 Nearest to you
+                        </span>
+                      )}
                       {visitedIds.includes(selectedPlace.id) && (
                         <span className={styles.visitedBadge}>✓ Visited</span>
                       )}
@@ -959,6 +1013,48 @@ export default function Home() {
             <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
               <button
                 type="button"
+                onClick={() => setNearestPandalModalOpen(true)}
+                style={{
+                  flex: 1,
+                  background: "#FFF9F0",
+                  border: "1px solid #C62828",
+                  color: "#C62828",
+                  borderRadius: 10,
+                  padding: "10px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                🧭 Nearest Puja
+              </button>
+              <button
+                type="button"
+                onClick={() => setBestInLocationModalOpen(true)}
+                style={{
+                  flex: 1,
+                  background: "#FFF",
+                  border: "1px solid #F5BD32",
+                  color: "#780D19",
+                  borderRadius: 10,
+                  padding: "10px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                🏆 Best in Location
+              </button>
+              <button
+                type="button"
                 onClick={() => setAreaModalOpen(true)}
                 style={{
                   flex: 1,
@@ -972,24 +1068,7 @@ export default function Home() {
                   cursor: "pointer",
                 }}
               >
-                🗺️ Select Areas &amp; Best Pandals
-              </button>
-              <button
-                type="button"
-                onClick={handleFindNearestPandal}
-                style={{
-                  flex: 1,
-                  background: "#FFF9F0",
-                  border: "1px solid #C62828",
-                  color: "#C62828",
-                  borderRadius: 10,
-                  padding: "10px",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                🧭 Locate Nearest Pandal
+                🗺️ Select Areas
               </button>
             </div>
 
@@ -1018,16 +1097,26 @@ export default function Home() {
                 <h2>{sortByNearest ? "Nearest Pandals" : "Worth a visit"}</h2>
               </div>
               <div className={styles.nearbyActions}>
-                {sortByNearest && (
+                {sortByNearest ? (
                   <button className={styles.resetSortBtn} onClick={() => setSortByNearest(false)}>
                     Reset
+                  </button>
+                ) : (
+                  <button
+                    className={styles.resetSortBtn}
+                    onClick={() => {
+                      if (!userCoords) handleFindNearestPandal();
+                      else setSortByNearest(true);
+                    }}
+                  >
+                    🧭 Sort Nearest
                   </button>
                 )}
                 <button
                   className={styles.seeAllBtn}
-                  onClick={() => setAreaModalOpen(true)}
+                  onClick={() => setBestInLocationModalOpen(true)}
                 >
-                  Explore Areas ›
+                  🏆 Best Pandals ›
                 </button>
               </div>
             </div>
@@ -1763,6 +1852,33 @@ export default function Home() {
           setShowRouteOnMap(true);
           setActiveTab("routes");
         }}
+      />
+
+      <BestInLocationModal
+        isOpen={bestInLocationModalOpen}
+        onClose={() => setBestInLocationModalOpen(false)}
+        allLocations={locations}
+        userCoords={userCoords}
+        onSelectPandal={(pandal) => {
+          setSelectedPlace(pandal);
+          setActiveTab("map");
+        }}
+        onAddToRoute={handleAddToRoute}
+        routePandalIds={routeStops.map((s) => s.id)}
+      />
+
+      <NearestPandalModal
+        isOpen={nearestPandalModalOpen}
+        onClose={() => setNearestPandalModalOpen(false)}
+        allLocations={locations}
+        userCoords={userCoords}
+        onSelectPandal={(pandal) => {
+          setSelectedPlace(pandal);
+          setActiveTab("map");
+        }}
+        onAddToRoute={handleAddToRoute}
+        onRequestGPS={handleFindNearestPandal}
+        routePandalIds={routeStops.map((s) => s.id)}
       />
 
       <GroupInviteModal
