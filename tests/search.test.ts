@@ -60,4 +60,22 @@ describe("Search matching utility", () => {
     expect(matchesSearchQuery(pandalNewTown, "")).toBe(true);
     expect(matchesSearchQuery(pandalNewTown, "   ")).toBe(true);
   });
+
+  it("matches Blue line and Green line metro stations", () => {
+    const shyambazar = {
+      name: "Shyambazar Metro Station",
+      locality: "Shyambazar · Blue Line (Line 1)",
+      category: "Metro",
+    };
+    const howrah = {
+      name: "Howrah Metro Station",
+      locality: "Howrah Railway Station · Green Line (Line 2)",
+      category: "Metro",
+    };
+    expect(matchesSearchQuery(shyambazar, "blue line")).toBe(true);
+    expect(matchesSearchQuery(shyambazar, "shyambazar metro")).toBe(true);
+    expect(matchesSearchQuery(howrah, "green line")).toBe(true);
+    expect(matchesSearchQuery(howrah, "howrah")).toBe(true);
+  });
 });
+

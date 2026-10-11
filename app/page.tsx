@@ -27,6 +27,7 @@ import {
   formatDistance,
 } from "@/lib/visits";
 import { matchesSearchQuery } from "@/lib/search";
+import { ALL_METRO_STATIONS, metroStationToPlace } from "@/lib/metro";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
 type FilterType = Category | "All" | "Visited";
@@ -47,11 +48,11 @@ type Place = {
   longitude?: number;
   facilities: string[];
   description: string;
+  metroLine?: "blue" | "green";
 };
 
 const civicUtilities: Place[] = [
-  { id: "metro-1", name: "Belgachia Metro Station", locality: "Belgachia", category: "Metro", distance: "Transit Hub", color: "#26734D", x: 42, y: 68, latitude: 22.6062, longitude: 88.3846, facilities: ["Metro", "Auto stand"], description: "Nearest transit connection for North Kolkata pandals." },
-  { id: "metro-2", name: "Shyambazar Metro Station", locality: "Shyambazar", category: "Metro", distance: "North Kolkata Junction", color: "#26734D", x: 40, y: 60, latitude: 22.6027, longitude: 88.3712, facilities: ["Metro", "Bus terminus"], description: "Key junction connecting Central and North Kolkata." },
+  ...ALL_METRO_STATIONS.map(metroStationToPlace),
   { id: "civic-1", name: "Public Drinking Water Point", locality: "Lake Town Connector", category: "Food", distance: "Drinking Water", color: "#F5BD32", x: 77, y: 50, latitude: 22.6015, longitude: 88.4012, facilities: ["Drinking water", "Purified water"], description: "Free civic drinking water facility." },
   { id: "civic-2", name: "Public Convenience & Restroom", locality: "VIP Road", category: "Toilet", distance: "Restroom", color: "#5D75A6", x: 35, y: 25, latitude: 22.6045, longitude: 88.4110, facilities: ["Accessible toilet"], description: "Civic sanitation point maintained for festival visitors." },
 ];
@@ -621,6 +622,8 @@ export default function Home() {
                 ? `Puja pandals (${livePandals.length || "Live"})`
                 : item === "Visited"
                 ? `✓ Visited (${visited.length})`
+                : item === "Metro"
+                ? `🚇 Metro (${ALL_METRO_STATIONS.length})`
                 : item}
             </button>
           ))}
@@ -643,9 +646,11 @@ export default function Home() {
                 ? `Matching (${mapPandals.length})`
                 : filter !== "All"
                 ? `${filter} (${mapPandals.length})`
-                : `Pandals (${mapPandals.length})`}
+                : `Pandals (${livePandals.length || mapPandals.length})`}
             </span>
             <span><i style={{ background: "#2E7D32" }}></i> Visited ({visited.length})</span>
+            <span><i style={{ background: "#0D47A1" }}></i> Blue M (Line 1)</span>
+            <span><i style={{ background: "#1B5E20" }}></i> Green M (Line 2)</span>
             {userLocation && <span><i style={{ background: "#1A73E8" }}></i> You</span>}
           </div>
           {locationNotice && (
@@ -658,14 +663,22 @@ export default function Home() {
         </div>
         {selected && displayedPandals.length > 0 ? (
           <article className={`${styles.placeCard} ${visited.includes(selected.id) ? styles.placeCardVisited : ""}`}>
-            <div className={styles.placePhoto}>
-              <span>{visited.includes(selected.id) ? "✓" : "দুর্গা"}</span>
+            <div
+              className={styles.placePhoto}
+              style={selected.category === "Metro" ? { background: `linear-gradient(145deg, ${selected.color || "#0D47A1"}, #001f3f)` } : undefined}
+            >
+              <span>{visited.includes(selected.id) ? "✓" : selected.category === "Metro" ? "M" : "দুর্গা"}</span>
             </div>
             <div className={styles.placeInfo}>
               <div className={styles.placeTop}>
                 <div>
                   <div className={styles.typeBadgeRow}>
-                    <p className={styles.type}>{selected.category}</p>
+                    <p
+                      className={styles.type}
+                      style={selected.category === "Metro" ? { color: selected.color || "#0D47A1" } : undefined}
+                    >
+                      {selected.category === "Metro" ? "🚇 METRO STATION" : selected.category}
+                    </p>
                     {visited.includes(selected.id) && (
                       <span className={styles.visitedBadge}>✓ Visited</span>
                     )}

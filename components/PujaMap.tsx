@@ -3,6 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { loadGoogleMaps } from "@/lib/googleMaps";
 import type { Pandal } from "@/lib/pandals";
+import {
+  BLUE_LINE_STATIONS,
+  GREEN_LINE_STATIONS,
+  ALL_METRO_STATIONS,
+  getMetroMarkerSvg,
+  metroStationToPlace,
+  type MetroStation,
+  type MetroLineType,
+} from "@/lib/metro";
 import styles from "./PujaMap.module.css";
 
 type Coordinates = { lat: number; lng: number };
@@ -29,7 +38,7 @@ export type MapItem = {
 type Props = {
   pandals: Array<Pandal | MapItem>;
   selectedId?: string;
-  onSelect?: (pandal: Pandal) => void;
+  onSelect?: (pandal: any) => void;
   editable?: boolean;
   pin?: Coordinates | null;
   onPinChange?: (point: Coordinates) => void;
@@ -38,6 +47,7 @@ type Props = {
   userLocation?: Coordinates | null;
   routeStops?: RouteStopMarker[];
   routePolyline?: string;
+  showMetro?: boolean;
 };
 
 const KOLKATA = { lat: 22.5726, lng: 88.3639 };
@@ -60,6 +70,7 @@ export default function PujaMap({
   userLocation,
   routeStops,
   routePolyline,
+  showMetro,
 }: Props) {
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -68,6 +79,10 @@ export default function PujaMap({
   const editMarkerRef = useRef<google.maps.Marker | null>(null);
   const routeMarkersRef = useRef<google.maps.Marker[]>([]);
   const routePolylineRef = useRef<google.maps.Polyline | null>(null);
+  const metroLinesRef = useRef<google.maps.Polyline[]>([]);
+  const metroMarkersRef = useRef<google.maps.Marker[]>([]);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const [showMetroLines, setShowMetroLines] = useState(showMetro ?? true);
   const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyCtDfk8jIajSqYzqAcJvzYSpjyKitnNAzE";
   const [state, setState] = useState<"loading" | "ready" | "error" | "missing">(
     mapsKey ? "loading" : "missing"
@@ -91,6 +106,7 @@ export default function PujaMap({
           gestureHandling: "greedy",
         });
         mapRef.current = map;
+        infoWindowRef.current = new google.maps.InfoWindow();
         if (editable) {
           map.addListener("click", (event: google.maps.MapMouseEvent) => {
             if (event.latLng) onPinChange?.({ lat: event.latLng.lat(), lng: event.latLng.lng() });
@@ -108,6 +124,9 @@ export default function PujaMap({
       if (userMarkerRef.current) userMarkerRef.current.setMap(null);
       routeMarkersRef.current.forEach((marker) => marker.setMap(null));
       if (routePolylineRef.current) routePolylineRef.current.setMap(null);
+      metroLinesRef.current.forEach((line) => line.setMap(null));
+      metroMarkersRef.current.forEach((marker) => marker.setMap(null));
+      if (infoWindowRef.current) infoWindowRef.current.close();
     };
   }, [editable, onPinChange]);
 
@@ -144,25 +163,64 @@ export default function PujaMap({
     markersRef.current.forEach((marker) => marker.setMap(null));
 
     const validPandals = pandals.filter(
-      (pandal): pandal is (Pandal | MapItem) & { latitude: number; longitude: number } =>
-        typeof pandal.latitude === "number" &&
-        typeof pandal.longitude === "number" &&
-        Number.isFinite(pandal.latitude) &&
-        Number.isFinite(pandal.longitude)
+      (pandal): pandal is (Pandal | MapItem) & { latitude: number; longitude: number } => {
+        if (typeof pandal.latitude !== "number" || typeof pandal.longitude !== "number") return false;
+        if (!Number.isFinite(pandal.latitude) || !Number.isFinite(pandal.longitude)) return false;
+        // When showMetroLines is active, metro stations are rendered by the dedicated metro route layer
+        if (showMetroLines && ((pandal as { category?: string }).category === "Metro" || pandal.id?.startsWith("metro-"))) {
+          return false;
+        }
+        return true;
+      }
     );
 
     markersRef.current = validPandals.map((pandal) => {
       const isSelected = pandal.id === selectedId;
       const isVisited = visitedIds.includes(pandal.id);
       const category = (pandal as { category?: string }).category;
+      const isMetro = category === "Metro" || pandal.id?.startsWith("metro-");
+
+      if (isMetro) {
+        const line: MetroLineType = (pandal as { metroLine?: MetroLineType }).metroLine || (pandal.id?.includes("green") ? "green" : "blue");
+        const isInterchange = Boolean((pandal as { isInterchange?: boolean }).isInterchange) || pandal.name.toLowerCase().includes("esplanade");
+        const marker = new google.maps.Marker({
+          position: { lat: pandal.latitude, lng: pandal.longitude },
+          map,
+          title: `${pandal.name} (${line === "blue" ? "Blue Line" : "Green Line"})`,
+          zIndex: isSelected ? 40 : 15,
+          icon: {
+            url: getMetroMarkerSvg(line, isSelected, isInterchange),
+            scaledSize: isSelected ? new google.maps.Size(36, 36) : new google.maps.Size(28, 28),
+            anchor: isSelected ? new google.maps.Point(18, 18) : new google.maps.Point(14, 14),
+          },
+        });
+        marker.addListener("click", () => {
+          const lineColor = line === "blue" ? "#0D47A1" : "#1B5E20";
+          const lineBadge = line === "blue" ? "Blue Line (Line 1)" : "Green Line (Line 2)";
+          const content = `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 6px 8px; min-width: 190px;">
+              <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${lineColor};"></span>
+                <span style="font-size: 10px; font-weight: 800; color: ${lineColor}; text-transform: uppercase; letter-spacing: 0.5px;">${lineBadge}</span>
+              </div>
+              <div style="font-size: 14px; font-weight: 800; color: #1a1a1a; line-height: 1.25; margin-bottom: 3px;">${pandal.name}</div>
+              <div style="font-size: 11px; color: #555; line-height: 1.35; margin-bottom: 6px;">${pandal.locality || (pandal as { address?: string }).address || "Kolkata Metro"}</div>
+              <div style="font-size: 10px; color: #780d19; font-weight: 700;">🚇 Tap card below for transit directions & nearby pandals</div>
+            </div>
+          `;
+          infoWindowRef.current?.setContent(content);
+          infoWindowRef.current?.open(map, marker);
+          onSelect?.(pandal as any);
+        });
+        return marker;
+      }
 
       let fillColor = isVisited
         ? isSelected ? "#1B5E20" : "#2E7D32"
         : isSelected ? "#780D19" : "#C62828";
 
       if (category && category !== "Pandal") {
-        if (category === "Metro") fillColor = isSelected ? "#155724" : "#26734D";
-        else if (category === "Food") fillColor = isSelected ? "#B78103" : "#F5BD32";
+        if (category === "Food") fillColor = isSelected ? "#B78103" : "#F5BD32";
         else if (category === "Toilet") fillColor = isSelected ? "#34495E" : "#5D75A6";
       }
 
@@ -201,6 +259,14 @@ export default function PujaMap({
         if (validPandals.length === 1) {
           map.setZoom(15);
         }
+      } else {
+        const activeMetro = ALL_METRO_STATIONS.find((s) => s.id === selectedId);
+        if (activeMetro) {
+          map.panTo({ lat: activeMetro.latitude, lng: activeMetro.longitude });
+          if (map.getZoom() && map.getZoom()! < 14) {
+            map.setZoom(15);
+          }
+        }
       }
     } else if (validPandals.length > 0 && !pin) {
       const bounds = new google.maps.LatLngBounds();
@@ -214,7 +280,130 @@ export default function PujaMap({
         map.fitBounds(bounds, 60);
       }
     }
-  }, [pandals, selectedId, onSelect, state, pin, visitedIds, userLocation]);
+  }, [pandals, selectedId, onSelect, state, pin, visitedIds, userLocation, showMetroLines]);
+
+  // Handle Kolkata Metro Connected Routes and "M" station markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || state !== "ready") return;
+
+    metroLinesRef.current.forEach((polyline) => polyline.setMap(null));
+    metroLinesRef.current = [];
+    metroMarkersRef.current.forEach((marker) => marker.setMap(null));
+    metroMarkersRef.current = [];
+
+    if (!showMetroLines) return;
+
+    if (!infoWindowRef.current) {
+      infoWindowRef.current = new google.maps.InfoWindow();
+    }
+
+    // 1. Blue Line Connected Route (Line 1: North-South)
+    const bluePolyline = new google.maps.Polyline({
+      path: BLUE_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
+      geodesic: true,
+      strokeColor: "#0D47A1",
+      strokeOpacity: 0.88,
+      strokeWeight: 4,
+      zIndex: 8,
+      map,
+    });
+    bluePolyline.addListener("click", (e: google.maps.MapMouseEvent) => {
+      if (e.latLng) {
+        infoWindowRef.current?.setContent(`
+          <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 6px 8px; line-height: 1.4;">
+            <div style="font-weight: 800; font-size: 13px; color: #0D47A1;">🔵 Blue Line (Line 1)</div>
+            <div style="font-size: 11px; color: #333; margin-top: 2px;">Dakshineswar ⇄ Kavi Subhash (North-South Corridor)</div>
+            <div style="font-size: 10px; color: #666; margin-top: 3px;">26 active stations connecting major North & South Kolkata pujos.</div>
+          </div>
+        `);
+        infoWindowRef.current?.setPosition(e.latLng);
+        infoWindowRef.current?.open(map);
+      }
+    });
+    metroLinesRef.current.push(bluePolyline);
+
+    // 2. Green Line Connected Route (Line 2: East-West Underwater)
+    const greenPolyline = new google.maps.Polyline({
+      path: GREEN_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
+      geodesic: true,
+      strokeColor: "#1B5E20",
+      strokeOpacity: 0.88,
+      strokeWeight: 4,
+      zIndex: 8,
+      map,
+    });
+    greenPolyline.addListener("click", (e: google.maps.MapMouseEvent) => {
+      if (e.latLng) {
+        infoWindowRef.current?.setContent(`
+          <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 6px 8px; line-height: 1.4;">
+            <div style="font-weight: 800; font-size: 13px; color: #1B5E20;">🟢 Green Line (Line 2)</div>
+            <div style="font-size: 11px; color: #333; margin-top: 2px;">Howrah Maidan ⇄ Sector V (Underwater River Corridor)</div>
+            <div style="font-size: 10px; color: #666; margin-top: 3px;">Direct underwater link connecting Howrah, Sealdah & Salt Lake pujos.</div>
+          </div>
+        `);
+        infoWindowRef.current?.setPosition(e.latLng);
+        infoWindowRef.current?.open(map);
+      }
+    });
+    metroLinesRef.current.push(greenPolyline);
+
+    // 3. Render Metro Station Markers ("M" in circle)
+    ALL_METRO_STATIONS.forEach((station) => {
+      const isSelected = selectedId === station.id;
+      const isBlue = station.line === "blue";
+      const lineColor = isBlue ? "#0D47A1" : "#1B5E20";
+      const lineBadge = isBlue ? "Blue Line (Line 1)" : "Green Line (Line 2)";
+
+      const marker = new google.maps.Marker({
+        position: { lat: station.latitude, lng: station.longitude },
+        map,
+        title: `${station.name} (${lineBadge})`,
+        zIndex: isSelected ? 40 : 15,
+        icon: {
+          url: getMetroMarkerSvg(station.line, isSelected, station.isInterchange),
+          scaledSize: isSelected ? new google.maps.Size(36, 36) : new google.maps.Size(28, 28),
+          anchor: isSelected ? new google.maps.Point(18, 18) : new google.maps.Point(14, 14),
+        },
+      });
+
+      marker.addListener("click", () => {
+        const content = `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 6px 8px; min-width: 190px;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${lineColor};"></span>
+              <span style="font-size: 10px; font-weight: 800; color: ${lineColor}; text-transform: uppercase; letter-spacing: 0.5px;">${lineBadge}</span>
+              ${station.isInterchange ? '<span style="background: #FFF3E0; color: #E65100; font-size: 8px; font-weight: 800; padding: 1px 4px; border-radius: 3px;">INTERCHANGE</span>' : ''}
+            </div>
+            <div style="font-size: 14px; font-weight: 800; color: #1a1a1a; line-height: 1.25; margin-bottom: 3px;">${station.name}</div>
+            <div style="font-size: 11px; color: #555; line-height: 1.35; margin-bottom: 6px;">${station.description}</div>
+            <div style="font-size: 10px; color: #780d19; font-weight: 700;">🚇 Tap card below for transit directions & nearby pandals</div>
+          </div>
+        `;
+        infoWindowRef.current?.setContent(content);
+        infoWindowRef.current?.open(map, marker);
+
+        onSelect?.(metroStationToPlace(station) as any);
+      });
+
+      if (isSelected) {
+        const content = `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 6px 8px; min-width: 190px;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${lineColor};"></span>
+              <span style="font-size: 10px; font-weight: 800; color: ${lineColor}; text-transform: uppercase; letter-spacing: 0.5px;">${lineBadge}</span>
+            </div>
+            <div style="font-size: 14px; font-weight: 800; color: #1a1a1a; line-height: 1.25; margin-bottom: 3px;">${station.name}</div>
+            <div style="font-size: 11px; color: #555; line-height: 1.35; margin-bottom: 6px;">${station.description}</div>
+          </div>
+        `;
+        infoWindowRef.current?.setContent(content);
+        infoWindowRef.current?.open(map, marker);
+      }
+
+      metroMarkersRef.current.push(marker);
+    });
+  }, [showMetroLines, selectedId, onSelect, state]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -329,9 +518,22 @@ export default function PujaMap({
         </div>
       )}
       {state === "ready" && (
-        <button className={styles.recenter} onClick={recenter} aria-label="Recenter map">
-          ⌖
-        </button>
+        <>
+          <button className={styles.recenter} onClick={recenter} aria-label="Recenter map" title="Recenter map">
+            ⌖
+          </button>
+          {!editable && (
+            <button
+              className={`${styles.metroToggle} ${showMetroLines ? styles.metroToggleActive : ""}`}
+              onClick={() => setShowMetroLines((prev) => !prev)}
+              title="Toggle Kolkata Metro route overlay (Blue Line & Green Line)"
+              aria-label="Toggle Kolkata Metro route overlay"
+            >
+              <span>🚇</span>
+              <span>Metro Lines {showMetroLines ? "On" : "Off"}</span>
+            </button>
+          )}
+        </>
       )}
       {editable && state === "ready" && (
         <p className={styles.hint}>Tap the map or drag the gold pin to confirm the exact location.</p>
