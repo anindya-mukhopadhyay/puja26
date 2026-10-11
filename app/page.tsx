@@ -23,6 +23,13 @@ import {
   isLocationStale,
 } from "@/lib/liveLocation";
 import {
+  getStoredVisited,
+  saveStoredVisited,
+  syncVisitToFirestore,
+  calculateDistanceKm,
+  formatDistance,
+} from "@/lib/visits";
+import {
   toggleFavourite,
   subscribeToUserFavourites,
   subscribeToUserVisits,
@@ -92,9 +99,11 @@ export default function Home() {
   const [googlePlaceDetails, setGooglePlaceDetails] = useState<GooglePlaceDetails | null>(null);
   const [loadingGoogleDetails, setLoadingGoogleDetails] = useState(false);
 
-  // Favourites & Visits
+  // Favourites, Visits & Proximity
   const [favourites, setFavourites] = useState<FavouriteItem[]>([]);
   const [visits, setVisits] = useState<VisitItem[]>([]);
+  const [visitedIds, setVisitedIds] = useState<string[]>([]);
+  const [sortByNearest, setSortByNearest] = useState(false);
 
   // Route & Day-Wise Itineraries
   const [activeDay, setActiveDay] = useState<ItineraryDay>("Day 1 (Saptami)");
@@ -107,6 +116,7 @@ export default function Home() {
   const [showRouteOnMap, setShowRouteOnMap] = useState(false);
   const [savedItineraries, setSavedItineraries] = useState<Itinerary[]>([]);
   const [itinerarySavedNotice, setItinerarySavedNotice] = useState("");
+  const [routeToast, setRouteToast] = useState<{ placeName: string; message: string } | null>(null);
 
   // Weather
   const [weather, setWeather] = useState<WeatherForecast | null>(null);
@@ -174,6 +184,18 @@ export default function Home() {
       .finally(() => setLoadingGoogleDetails(false));
   }, [selectedPlace]);
 
+  // Initialize visited pandals from local storage
+  useEffect(() => {
+    setVisitedIds(getStoredVisited());
+  }, []);
+
+  // Auto-dismiss route toast
+  useEffect(() => {
+    if (!routeToast) return;
+    const timer = setTimeout(() => setRouteToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [routeToast]);
+
   // Subscribe to user favourites and visits
   useEffect(() => {
     if (!user) {
@@ -183,7 +205,13 @@ export default function Home() {
       return;
     }
     const unsubFavs = subscribeToUserFavourites(user.uid, setFavourites);
-    const unsubVisits = subscribeToUserVisits(user.uid, setVisits);
+    const unsubVisits = subscribeToUserVisits(user.uid, (items) => {
+      setVisits(items);
+      const visitIds = items.map((v) => v.locationId);
+      if (visitIds.length > 0) {
+        setVisitedIds((prev) => Array.from(new Set([...prev, ...visitIds])));
+      }
+    });
     const unsubItin = subscribeToUserItineraries(user.uid, setSavedItineraries);
     return () => {
       unsubFavs();
@@ -234,6 +262,17 @@ export default function Home() {
     });
   }, [locations, categoryFilter, searchQuery]);
 
+  // Pandals sorted by proximity when GPS is enabled
+  const sortedNearbyPandals = useMemo(() => {
+    const list = locations.filter((p) => p.category === "Pandal");
+    if (!sortByNearest || !userCoords) return list;
+    return [...list].sort((a, b) => {
+      const distA = calculateDistanceKm(userCoords.lat, userCoords.lng, a.latitude, a.longitude);
+      const distB = calculateDistanceKm(userCoords.lat, userCoords.lng, b.latitude, b.longitude);
+      return distA - distB;
+    });
+  }, [locations, sortByNearest, userCoords]);
+
   const isSelectedFav = favourites.some((f) => f.locationId === selectedPlace.id);
   const isSelectedVisited = visits.some((v) => v.locationId === selectedPlace.id);
 
@@ -255,6 +294,7 @@ export default function Home() {
         const result = findNearestPandal(coords.lat, coords.lng, locations);
         if (result) {
           setSelectedPlace(result.pandal);
+          setSortByNearest(true);
           setNearestNotice(
             `📍 Nearest Pandal: ${result.pandal.name} is ${result.distanceKm} km away from your location!`
           );
@@ -287,14 +327,64 @@ export default function Home() {
     }
   };
 
+  const toggleVisited = async (id: string) => {
+    const isAlreadyVisited = visitedIds.includes(id);
+    const next = isAlreadyVisited ? visitedIds.filter((x) => x !== id) : [...visitedIds, id];
+    setVisitedIds(next);
+    saveStoredVisited(next);
+    if (user) {
+      await syncVisitToFirestore(id, !isAlreadyVisited, user.uid);
+    }
+  };
+
+  const toggleRoute = (place: LocationItem) => {
+    setRouteStops((prev) => {
+      const exists = prev.some((p) => p.id === place.id);
+      let updated: LocationItem[];
+      if (exists) {
+        updated = prev.filter((p) => p.id !== place.id);
+        setRouteToast({
+          placeName: place.name,
+          message: "Removed from route",
+        });
+      } else {
+        updated = [...prev, place];
+        setRouteToast({
+          placeName: place.name,
+          message: `Added as Stop #${updated.length} in your route!`,
+        });
+      }
+      return updated;
+    });
+  };
+
+  const openPandalDirections = (place: LocationItem) => {
+    const dest =
+      Number.isFinite(place.latitude) && Number.isFinite(place.longitude)
+        ? `${place.latitude},${place.longitude}`
+        : encodeURIComponent(`${place.name}, ${place.locality || "Kolkata"}`);
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, "_blank");
+  };
+
   const handleAddToRoute = (place: LocationItem) => {
     if (!routeStops.some((s) => s.id === place.id)) {
       setRouteStops((prev) => [...prev, place]);
+      setRouteToast({
+        placeName: place.name,
+        message: `Added as Stop #${routeStops.length + 1} in your route!`,
+      });
     }
   };
 
   const handleRemoveRouteStop = (id: string) => {
+    const found = routeStops.find((s) => s.id === id);
     setRouteStops((prev) => prev.filter((s) => s.id !== id));
+    if (found) {
+      setRouteToast({
+        placeName: found.name,
+        message: "Removed from route",
+      });
+    }
   };
 
   const handleMoveStop = (index: number, direction: "up" | "down") => {
@@ -689,11 +779,21 @@ export default function Home() {
                 liveMembers={groupLiveLocations}
                 routeStops={routeStops}
                 showRoutePath={showRouteOnMap}
+                visitedIds={visitedIds}
+                userLocation={userCoords}
               />
               <div className={styles.mapLegend}>
                 <span>
                   <i style={{ background: "#C62828" }}></i> Pandal
                 </span>
+                <span>
+                  <i style={{ background: "#2E7D32" }}></i> Visited ({visitedIds.length})
+                </span>
+                {userCoords && (
+                  <span>
+                    <i style={{ background: "#1A73E8" }}></i> You
+                  </span>
+                )}
                 <span>
                   <i style={{ background: "#26734D" }}></i> Metro
                 </span>
@@ -713,9 +813,11 @@ export default function Home() {
             </div>
 
             {/* Selected Location Preview Card with Live Google Maps Details */}
-            <article className={styles.placeCard}>
+            <article className={`${styles.placeCard} ${visitedIds.includes(selectedPlace.id) ? styles.placeCardVisited : ""}`}>
               <div className={styles.placePhoto}>
-                {googlePlaceDetails?.photoUrl ? (
+                {visitedIds.includes(selectedPlace.id) ? (
+                  <span style={{ fontSize: 24, color: "#2E7D32", fontWeight: "bold" }}>✓</span>
+                ) : googlePlaceDetails?.photoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={googlePlaceDetails.photoUrl}
@@ -729,7 +831,20 @@ export default function Home() {
               <div className={styles.placeInfo}>
                 <div className={styles.placeTop}>
                   <div>
-                    <p className={styles.type}>{selectedPlace.category}</p>
+                    <div className={styles.typeBadgeRow}>
+                      <p className={styles.type}>{selectedPlace.category}</p>
+                      {visitedIds.includes(selectedPlace.id) && (
+                        <span className={styles.visitedBadge}>✓ Visited</span>
+                      )}
+                      {routeStops.some((p) => p.id === selectedPlace.id) && (
+                        <span
+                          className={styles.visitedBadge}
+                          style={{ background: "#FFF3E0", color: "#E65100", borderColor: "#FFE0B2" }}
+                        >
+                          Stop #{routeStops.findIndex((p) => p.id === selectedPlace.id) + 1}
+                        </span>
+                      )}
+                    </div>
                     <h2>{selectedPlace.name}</h2>
                   </div>
                   <button
@@ -743,6 +858,9 @@ export default function Home() {
 
                 <p className={styles.muted}>
                   {googlePlaceDetails?.formattedAddress || selectedPlace.locality || selectedPlace.address}
+                  {userCoords && Number.isFinite(selectedPlace.latitude) && Number.isFinite(selectedPlace.longitude) && (
+                    <> · <span className={styles.distanceHighlight}>{formatDistance(calculateDistanceKm(userCoords.lat, userCoords.lng, selectedPlace.latitude, selectedPlace.longitude))}</span></>
+                  )}
                 </p>
 
                 {/* Rating & Google Maps Details */}
@@ -798,23 +916,20 @@ export default function Home() {
 
                 <div className={styles.actions}>
                   <button
-                    className={styles.secondary}
-                    onClick={() => handleAddToRoute(selectedPlace)}
+                    className={visitedIds.includes(selectedPlace.id) ? styles.visitedBtnActive : styles.visitedBtn}
+                    onClick={() => toggleVisited(selectedPlace.id)}
+                    title={visitedIds.includes(selectedPlace.id) ? "Marked as visited (click to toggle)" : "Mark pandal as visited"}
                   >
-                    ＋ Add to plan
+                    {visitedIds.includes(selectedPlace.id) ? "✓ Visited" : "✓ Mark as Visited"}
                   </button>
                   <button
-                    className={styles.secondary}
-                    onClick={() => {
-                      if (!user) setAuthModalOpen(true);
-                      else setVisitModalOpen(true);
-                    }}
-                    style={{
-                      background: isSelectedVisited ? "#E8F5E9" : "#FFF",
-                      color: isSelectedVisited ? "#26734D" : "#780D19",
-                    }}
+                    className={routeStops.some((p) => p.id === selectedPlace.id) ? styles.routeInBtn : styles.routeAddBtn}
+                    onClick={() => toggleRoute(selectedPlace)}
+                    title={routeStops.some((p) => p.id === selectedPlace.id) ? "Currently in route itinerary. Click to remove" : "Add pandal to your route itinerary"}
                   >
-                    {isSelectedVisited ? "✓ Visited" : "Mark visit"}
+                    {routeStops.some((p) => p.id === selectedPlace.id)
+                      ? `✓ In Route (#${routeStops.findIndex((p) => p.id === selectedPlace.id) + 1})`
+                      : "＋ Add to Route"}
                   </button>
                   <button
                     className={styles.secondary}
@@ -824,14 +939,19 @@ export default function Home() {
                   </button>
                   <button
                     className={styles.primary}
-                    onClick={() => {
-                      handleAddToRoute(selectedPlace);
-                      setActiveTab("routes");
-                    }}
+                    onClick={() => openPandalDirections(selectedPlace)}
+                    title="Open direct turn-by-turn navigation in Google Maps"
                   >
-                    Directions →
+                    Directions ↗
                   </button>
                 </div>
+
+                {routeStops.length > 0 && (
+                  <div className={styles.routeCardHint}>
+                    <span>🚶 <strong>{routeStops.length} pandal{routeStops.length === 1 ? "" : "s"}</strong> planned in your itinerary</span>
+                    <button onClick={() => setActiveTab("routes")}>View Itinerary →</button>
+                  </div>
+                )}
               </div>
             </article>
 
@@ -873,30 +993,69 @@ export default function Home() {
               </button>
             </div>
 
+            {/* Route Progress Float Bar */}
+            {routeStops.length > 0 && (
+              <div className={styles.routeFloatBar}>
+                <div className={styles.routeFloatInfo}>
+                  <span className={styles.routeFloatIcon}>🚶</span>
+                  <div>
+                    <strong>Your Route: {routeStops.length} Pandal{routeStops.length === 1 ? "" : "s"} Planned</strong>
+                    <small>~{routeStops.length * 30} mins estimated visit time · Tap to view full itinerary</small>
+                  </div>
+                </div>
+                <button className={styles.routeFloatBtn} onClick={() => setActiveTab("routes")}>
+                  View Route ({routeStops.length}) →
+                </button>
+              </div>
+            )}
+
             {/* Nearby Worth a Visit */}
             <div className={styles.nearbyHeading}>
               <div>
-                <p className={styles.kicker}>EXPLORE NEARBY</p>
-                <h2>Worth a visit</h2>
+                <p className={styles.kicker}>
+                  {sortByNearest ? "SORTED BY PROXIMITY" : "EXPLORE NEARBY"}
+                </p>
+                <h2>{sortByNearest ? "Nearest Pandals" : "Worth a visit"}</h2>
               </div>
-              <button onClick={() => setAreaModalOpen(true)}>Explore Areas ›</button>
+              <div className={styles.nearbyActions}>
+                {sortByNearest && (
+                  <button className={styles.resetSortBtn} onClick={() => setSortByNearest(false)}>
+                    Reset
+                  </button>
+                )}
+                <button
+                  className={styles.seeAllBtn}
+                  onClick={() => setAreaModalOpen(true)}
+                >
+                  Explore Areas ›
+                </button>
+              </div>
             </div>
             <div className={styles.nearby}>
-              {locations
-                .filter((p) => p.category === "Pandal")
-                .map((p) => (
+              {sortedNearbyPandals.map((p) => {
+                const isVisited = visitedIds.includes(p.id);
+                return (
                   <button
                     key={p.id}
-                    className={styles.nearbyCard}
+                    className={`${styles.nearbyCard} ${isVisited ? styles.nearbyCardVisited : ""}`}
                     onClick={() => setSelectedPlace(p)}
                   >
-                    <div className={styles.tinyPhoto}>✦</div>
+                    <div className={`${styles.tinyPhoto} ${isVisited ? styles.tinyPhotoVisited : ""}`}>
+                      {isVisited ? "✓" : "✦"}
+                    </div>
+                    {isVisited && <span className={styles.tinyVisitedTag}>✓ Visited</span>}
                     <strong>{p.name}</strong>
                     <span>
                       ★ {p.rating || "4.8"} · {p.locality.split(",")[0]}
                     </span>
+                    {userCoords && Number.isFinite(p.latitude) && Number.isFinite(p.longitude) && (
+                      <small className={styles.nearbyDistance}>
+                        📍 {formatDistance(calculateDistanceKm(userCoords.lat, userCoords.lng, p.latitude, p.longitude))}
+                      </small>
+                    )}
                   </button>
-                ))}
+                );
+              })}
             </div>
           </>
         )}
@@ -1003,9 +1162,13 @@ export default function Home() {
               ) : (
                 routeStops.map((p, index) => (
                   <div className={styles.stop} key={p.id}>
-                    <i>{index + 1}</i>
+                    <i className={visitedIds.includes(p.id) ? styles.visitedStopIndex : ""}>
+                      {visitedIds.includes(p.id) ? "✓" : index + 1}
+                    </i>
                     <div>
-                      <strong>{p.name}</strong>
+                      <strong>
+                        {p.name} {visitedIds.includes(p.id) ? <span style={{ color: "#2E7D32", fontSize: "11px" }}>✓</span> : null}
+                      </strong>
                       <span>{p.locality}</span>
                       <small>
                         {index === 0
@@ -1382,12 +1545,12 @@ export default function Home() {
                 <span>Saved</span>
               </div>
               <div>
-                <strong>{visits.length}</strong>
+                <strong>{visitedIds.length}</strong>
                 <span>Visited</span>
               </div>
               <div>
-                <strong>{savedItineraries.length}</strong>
-                <span>Itineraries</span>
+                <strong>{routeStops.length}</strong>
+                <span>Route Stops</span>
               </div>
               <div>
                 <strong>{userGroups.length}</strong>
@@ -1507,15 +1670,48 @@ export default function Home() {
           </section>
         )}
 
+        {/* Route Toast Feedback */}
+        {routeToast && (
+          <div className={styles.routeToast} role="status">
+            <div>
+              <strong>{routeToast.placeName}</strong>
+              <span>: {routeToast.message}</span>
+            </div>
+            <div className={styles.routeToastActions}>
+              <button
+                className={styles.routeToastViewBtn}
+                onClick={() => {
+                  setActiveTab("routes");
+                  setRouteToast(null);
+                }}
+              >
+                View Route ({routeStops.length}) →
+              </button>
+              <button
+                className={styles.routeToastCloseBtn}
+                onClick={() => setRouteToast(null)}
+                aria-label="Dismiss toast"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Bottom Navigation */}
         <nav className={styles.nav} aria-label="Main navigation">
           {NAV_ITEMS.map(([id, glyph, label]) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
-              className={activeTab === id ? styles.activeNav : ""}
+              className={`${activeTab === id ? styles.activeNav : ""} ${styles.navBtn}`}
             >
-              <Icon>{glyph}</Icon>
+              <div className={styles.navIconWrap}>
+                <Icon>{glyph}</Icon>
+                {id === "routes" && routeStops.length > 0 && (
+                  <span className={styles.navBadge}>{routeStops.length}</span>
+                )}
+              </div>
               <span>{label}</span>
             </button>
           ))}

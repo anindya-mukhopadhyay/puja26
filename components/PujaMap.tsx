@@ -17,6 +17,8 @@ type Props = {
   liveMembers?: LiveLocation[];
   routeStops?: LocationItem[];
   showRoutePath?: boolean;
+  visitedIds?: string[];
+  userLocation?: Coordinates | null;
   className?: string;
 };
 
@@ -50,6 +52,8 @@ export default function PujaMap({
   liveMembers = [],
   routeStops = [],
   showRoutePath = false,
+  visitedIds = [],
+  userLocation,
   className,
 }: Props) {
   const elementRef = useRef<HTMLDivElement>(null);
@@ -76,7 +80,7 @@ export default function PujaMap({
       .then(() => {
         if (cancelled || !elementRef.current) return;
         const map = new google.maps.Map(elementRef.current, {
-          center: pin || KOLKATA,
+          center: pin || userLocation || KOLKATA,
           zoom: pin ? 15 : 12,
           styles: mapStyles,
           mapTypeControl: false,
@@ -113,9 +117,35 @@ export default function PujaMap({
         polylineRef.current.setMap(null);
       }
     };
-  }, [editable, onPinChange]);
+  }, [editable, onPinChange, pin, userLocation]);
 
-  // Render Pandal / Facility markers
+  // Handle user current location marker
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || state !== "ready") return;
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setMap(null);
+      userMarkerRef.current = null;
+    }
+    if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
+      userMarkerRef.current = new google.maps.Marker({
+        position: userLocation,
+        map,
+        title: "Your location",
+        zIndex: 50,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 9,
+          fillColor: "#1A73E8",
+          fillOpacity: 1,
+          strokeColor: "#FFFFFF",
+          strokeWeight: 3,
+        },
+      });
+    }
+  }, [userLocation, state]);
+
+  // Render Pandal / Facility markers (with visited checkmarks & route numbers)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || state !== "ready") return;
@@ -132,30 +162,50 @@ export default function PujaMap({
       .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
       .map((p) => {
         const isSelected = p.id === selectedId;
+        const isVisited = visitedIds.includes(p.id);
         const routeOrder = showRoutePath ? routeOrderMap.get(p.id) : undefined;
-        const color = CATEGORY_COLORS[p.category] || "#C62828";
+        const defaultColor = CATEGORY_COLORS[p.category] || "#C62828";
+
+        const fillColor = isVisited
+          ? (isSelected ? "#1B5E20" : "#2E7D32")
+          : (isSelected ? "#780D19" : routeOrder ? "#C62828" : defaultColor);
+
+        const strokeColor = isSelected
+          ? "#F5BD32"
+          : isVisited
+          ? "#A5D6A7"
+          : routeOrder
+          ? "#FFFFFF"
+          : "#FFF9F0";
 
         const markerOptions: google.maps.MarkerOptions = {
           position: { lat: p.latitude, lng: p.longitude },
           map,
-          title: routeOrder ? `#${routeOrder} ${p.name}` : `${p.name} (${p.category})`,
-          zIndex: isSelected ? 30 : routeOrder ? 20 : 5,
+          title: `${routeOrder ? `#${routeOrder} ` : ""}${p.name}${isVisited ? " (Visited ✓)" : ""}`,
+          zIndex: isSelected ? 30 : routeOrder ? 20 : isVisited ? 15 : 5,
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
-            scale: isSelected ? 13 : routeOrder ? 11 : p.category === "Pandal" ? 9 : 7,
-            fillColor: isSelected ? "#780D19" : routeOrder ? "#C62828" : color,
+            scale: isSelected ? 13 : routeOrder ? 11 : isVisited ? 10 : p.category === "Pandal" ? 9 : 7,
+            fillColor,
             fillOpacity: 1,
-            strokeColor: isSelected ? "#F5BD32" : routeOrder ? "#FFFFFF" : "#FFF9F0",
+            strokeColor,
             strokeWeight: isSelected ? 4 : routeOrder ? 3 : 2,
           },
         };
 
         if (routeOrder) {
           markerOptions.label = {
-            text: String(routeOrder),
+            text: isVisited ? `${routeOrder}✓` : String(routeOrder),
             color: "#FFFFFF",
             fontSize: "10px",
             fontWeight: "bold",
+          };
+        } else if (isVisited) {
+          markerOptions.label = {
+            text: "✓",
+            color: "#FFFFFF",
+            fontWeight: "bold",
+            fontSize: isSelected ? "13px" : "10px",
           };
         }
 
@@ -183,11 +233,15 @@ export default function PujaMap({
           hasValidCoords = true;
         }
       });
+      if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
+        bounds.extend({ lat: userLocation.lat, lng: userLocation.lng });
+        hasValidCoords = true;
+      }
       if (hasValidCoords && !bounds.isEmpty()) {
         map.fitBounds(bounds, { top: 40, right: 30, bottom: 40, left: 30 });
       }
     }
-  }, [pandals, selectedId, onSelect, pin, routeStops, showRoutePath, state]);
+  }, [pandals, selectedId, onSelect, pin, routeStops, showRoutePath, visitedIds, userLocation, state]);
 
   // Render Pathfinding Polyline or Google Maps DirectionsRenderer
   useEffect(() => {
@@ -214,7 +268,7 @@ export default function PujaMap({
       const directionsService = new google.maps.DirectionsService();
       const directionsRenderer = new google.maps.DirectionsRenderer({
         map,
-        suppressMarkers: true, // We already draw our styled numbered markers!
+        suppressMarkers: true,
         polylineOptions: {
           strokeColor: "#780D19", // Puja26 dark maroon
           strokeOpacity: 0.85,
@@ -241,13 +295,11 @@ export default function PujaMap({
           if (status === google.maps.DirectionsStatus.OK && result) {
             directionsRenderer.setDirections(result);
           } else {
-            // Directions quota or walk path unavailable -> draw clean geodesic polyline
             drawGeodesicPolyline(map, validStops);
           }
         }
       );
     } else {
-      // More than 10 stops or DirectionsService unavailable -> draw clean geodesic polyline
       drawGeodesicPolyline(map, validStops);
     }
 
@@ -271,7 +323,7 @@ export default function PujaMap({
     polylineRef.current = polyline;
   };
 
-  // Render Live Group Members
+  // Render Live Group Members (RTDB)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || state !== "ready") return;
@@ -337,8 +389,8 @@ export default function PujaMap({
   const recenter = () => {
     const map = mapRef.current;
     if (!map) return;
-    map.setCenter(pin || KOLKATA);
-    map.setZoom(pin ? 15 : 12);
+    map.setCenter(pin || userLocation || KOLKATA);
+    map.setZoom(pin ? 15 : 13);
   };
 
   const locateUser = () => {
@@ -362,8 +414,8 @@ export default function PujaMap({
             zIndex: 40,
             icon: {
               path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: "#1976D2",
+              scale: 9,
+              fillColor: "#1A73E8",
               fillOpacity: 1,
               strokeColor: "#FFFFFF",
               strokeWeight: 3,
