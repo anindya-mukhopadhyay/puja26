@@ -46,6 +46,38 @@ export function saveStoredSaved(savedIds: string[]): void {
   }
 }
 
+const LOCATION_STORAGE_KEY = "puja26_user_location_v1";
+
+export function getStoredUserLocation(): { lat: number; lng: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LOCATION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.lat === "number" &&
+      typeof parsed.lng === "number" &&
+      Number.isFinite(parsed.lat) &&
+      Number.isFinite(parsed.lng)
+    ) {
+      return { lat: parsed.lat, lng: parsed.lng };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredUserLocation(coords: { lat: number; lng: number }): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(coords));
+  } catch (err) {
+    console.warn("Failed to save user location to localStorage:", err);
+  }
+}
+
 export async function syncVisitToFirestore(pandalId: string, visited: boolean, userId?: string): Promise<void> {
   if (!db || !userId) return;
   try {

@@ -24,6 +24,8 @@ import {
   saveStoredVisited,
   getStoredSaved,
   saveStoredSaved,
+  getStoredUserLocation,
+  saveStoredUserLocation,
   syncVisitToFirestore,
   calculateDistanceKm,
   formatDistance,
@@ -140,6 +142,27 @@ export default function Home() {
     setVisited(getStoredVisited());
     setSaved(getStoredSaved());
     setRoute(getStoredRoute());
+
+    // Immediately restore cached location so map centers right away on reload
+    const cachedLoc = getStoredUserLocation();
+    if (cachedLoc) {
+      setUserLocation(cachedLoc);
+    }
+
+    // Automatically request fresh current GPS position upon reload/mount
+    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setUserLocation(coords);
+          saveStoredUserLocation(coords);
+        },
+        (err) => {
+          console.warn("Auto-geolocation on load:", err);
+        },
+        { timeout: 10000, enableHighAccuracy: true, maximumAge: 60000 }
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -287,6 +310,7 @@ export default function Home() {
         (pos) => {
           const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setUserLocation(coords);
+          saveStoredUserLocation(coords);
           setSortByNearest(true);
           setLocating(false);
         },

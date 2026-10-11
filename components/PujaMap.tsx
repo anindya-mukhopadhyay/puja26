@@ -86,6 +86,9 @@ export default function PujaMap({
   const metroLinesRef = useRef<google.maps.Polyline[]>([]);
   const metroMarkersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const userCircleRef = useRef<google.maps.Circle | null>(null);
+  const initialCenteringDoneRef = useRef(false);
+  const prevSelectedIdRef = useRef<string | undefined>(selectedId);
   const [showMetroLines, setShowMetroLines] = useState(showMetro ?? true);
   const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyCtDfk8jIajSqYzqAcJvzYSpjyKitnNAzE";
   const [state, setState] = useState<"loading" | "ready" | "error" | "missing">(
@@ -99,9 +102,10 @@ export default function PujaMap({
     loadGoogleMaps("maps")
       .then(() => {
         if (cancelled || !elementRef.current) return;
+        const initialCenter = pin || userLocation || KOLKATA;
         const map = new google.maps.Map(elementRef.current, {
-          center: pin || userLocation || KOLKATA,
-          zoom: pin ? 15 : 12,
+          center: initialCenter,
+          zoom: pin ? 15 : userLocation ? 14 : 12,
           styles: mapStyles,
           mapTypeControl: false,
           streetViewControl: false,
@@ -126,6 +130,7 @@ export default function PujaMap({
       cancelled = true;
       markersRef.current.forEach((marker) => marker.setMap(null));
       if (userMarkerRef.current) userMarkerRef.current.setMap(null);
+      if (userCircleRef.current) userCircleRef.current.setMap(null);
       routeMarkersRef.current.forEach((marker) => marker.setMap(null));
       if (routePolylineRef.current) routePolylineRef.current.setMap(null);
       metroLinesRef.current.forEach((line) => line.setMap(null));
@@ -134,13 +139,17 @@ export default function PujaMap({
     };
   }, [editable, onPinChange]);
 
-  // Handle user current location marker
+  // Handle user current location marker and centering on load/reload
   useEffect(() => {
     const map = mapRef.current;
     if (!map || state !== "ready") return;
     if (userMarkerRef.current) {
       userMarkerRef.current.setMap(null);
       userMarkerRef.current = null;
+    }
+    if (userCircleRef.current) {
+      userCircleRef.current.setMap(null);
+      userCircleRef.current = null;
     }
     if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
       userMarkerRef.current = new google.maps.Marker({
@@ -150,15 +159,34 @@ export default function PujaMap({
         zIndex: 50,
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 8,
+          scale: 9,
           fillColor: "#1A73E8",
           fillOpacity: 1,
           strokeColor: "#FFFFFF",
-          strokeWeight: 3,
+          strokeWeight: 3.5,
         },
       });
+
+      userCircleRef.current = new google.maps.Circle({
+        strokeColor: "#1A73E8",
+        strokeOpacity: 0.3,
+        strokeWeight: 1.5,
+        fillColor: "#1A73E8",
+        fillOpacity: 0.12,
+        map,
+        center: userLocation,
+        radius: 150,
+        zIndex: 49,
+      });
+
+      // Auto-center squarely on user's current location upon reload or detection
+      if (!initialCenteringDoneRef.current && !pin) {
+        map.setCenter(userLocation);
+        map.setZoom(14);
+        initialCenteringDoneRef.current = true;
+      }
     }
-  }, [userLocation, state]);
+  }, [userLocation, state, pin]);
 
   // Handle pandal markers (including checked visited markers)
   useEffect(() => {
@@ -268,7 +296,11 @@ export default function PujaMap({
       return marker;
     });
 
-    if (selectedId) {
+    const prevSelectedId = prevSelectedIdRef.current;
+    prevSelectedIdRef.current = selectedId;
+
+    // Only pan to selected pandal if user deliberately clicked / selected another pandal
+    if (selectedId && selectedId !== prevSelectedId) {
       const active = validPandals.find((p) => p.id === selectedId);
       if (active) {
         map.panTo({ lat: active.latitude, lng: active.longitude });
@@ -284,17 +316,16 @@ export default function PujaMap({
           }
         }
       }
-    } else if (validPandals.length > 0 && !pin) {
+    } else if (!userLocation && validPandals.length > 0 && !pin && !initialCenteringDoneRef.current) {
+      // If user's GPS is not available at all, fit bounds to show pandals
       const bounds = new google.maps.LatLngBounds();
       validPandals.forEach((p) => {
         bounds.extend({ lat: p.latitude, lng: p.longitude });
       });
-      if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
-        bounds.extend({ lat: userLocation.lat, lng: userLocation.lng });
-      }
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds, 60);
       }
+      initialCenteringDoneRef.current = true;
     }
   }, [pandals, selectedId, onSelect, state, pin, visitedIds, userLocation, showMetroLines]);
 
@@ -488,8 +519,13 @@ export default function PujaMap({
   const recenter = () => {
     const map = mapRef.current;
     if (!map) return;
-    map.setCenter(pin || userLocation || KOLKATA);
-    map.setZoom(pin ? 15 : 13);
+    if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
+      map.panTo(userLocation);
+      map.setZoom(14);
+    } else {
+      map.panTo(pin || KOLKATA);
+      map.setZoom(pin ? 15 : 13);
+    }
   };
 
   return (

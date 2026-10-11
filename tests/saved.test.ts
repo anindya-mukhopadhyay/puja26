@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getStoredSaved, saveStoredSaved } from "../lib/visits";
+import {
+  getStoredSaved,
+  saveStoredSaved,
+  getStoredUserLocation,
+  saveStoredUserLocation,
+} from "../lib/visits";
 
-describe("Saved Pandals Storage Utility", () => {
+describe("Saved Pandals & Location Storage Utility", () => {
   let mockStorage: Record<string, string> = {};
 
   beforeEach(() => {
@@ -49,8 +54,24 @@ describe("Saved Pandals Storage Utility", () => {
     expect(getStoredSaved()).toEqual(["pandal-1"]);
   });
 
+  it("stores and retrieves user location across reloads", () => {
+    expect(getStoredUserLocation()).toBeNull();
+    const loc = { lat: 22.5726, lng: 88.3639 };
+    saveStoredUserLocation(loc);
+    expect(getStoredUserLocation()).toEqual(loc);
+  });
+
+  it("handles invalid or corrupted user location gracefully", () => {
+    (global as any).localStorage.setItem("puja26_user_location_v1", "not-json");
+    expect(getStoredUserLocation()).toBeNull();
+
+    (global as any).localStorage.setItem("puja26_user_location_v1", JSON.stringify({ lat: "abc" }));
+    expect(getStoredUserLocation()).toBeNull();
+  });
+
   it("returns empty array in SSR when window is undefined", () => {
     delete (global as any).window;
     expect(getStoredSaved()).toEqual([]);
+    expect(getStoredUserLocation()).toBeNull();
   });
 });
