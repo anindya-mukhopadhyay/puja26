@@ -1,6 +1,39 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600;1,700&display=swap');
 
-:root { --ivory:#fff9f0; --paper:#fff; --gold:#f5bd32; --red:#c62828; --maroon:#780d19; --ink:#191516; --muted:#70676a; --line:#e8dccb; --green:#26734d; }
+:root {
+  color-scheme: light;
+  --ivory:#fff9f0;
+  --paper:#fff;
+  --gold:#f5bd32;
+  --red:#c62828;
+  --maroon:#780d19;
+  --ink:#191516;
+  --muted:#70676a;
+  --line:#e8dccb;
+  --green:#26734d;
+}
 * { box-sizing:border-box; }
-html, body { margin:0; background:#f5eee3; color:var(--ink); font-family:"DM Sans",system-ui,sans-serif; }
-button, input { font:inherit; } button { cursor:pointer; }
+html, body {
+  margin:0;
+  background:#f5eee3;
+  color:var(--ink);
+  font-family:"DM Sans",system-ui,sans-serif;
+  color-scheme: light;
+}
+button, input, select, textarea { font:inherit; color-scheme: light; }
+button { cursor:pointer; }
+
+/* Enforce light theme on Google Maps Web Components */
+gmp-place-autocomplete {
+  color-scheme: light !important;
+  background-color: #ffffff !important;
+  color: #191516 !important;
+  border: 1px solid #e8dccb !important;
+  border-radius: 10px !important;
+  --gmpx-color-surface: #ffffff !important;
+  --gmpx-color-on-surface: #191516 !important;
+  --gmpx-color-on-surface-variant: #70676a !important;
+  --gmpx-color-outline: #e8dccb !important;
+  --gmpx-color-primary: #780d19 !important;
+}
+

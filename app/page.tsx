@@ -4,12 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import styles from "./page.module.css";
-import PujaMap from "@/components/PujaMap";
+import PujaMap, { type RouteStopMarker } from "@/components/PujaMap";
 import { auth, firebaseConfigured } from "@/lib/firebase";
 import { signOutUser } from "@/lib/auth";
 import { type Pandal, subscribeToPublishedPandals } from "@/lib/pandals";
 import GroupsManager from "@/components/GroupsManager";
 import { getStoredGroups, type PujaGroup } from "@/lib/groups";
+import {
+  optimizePandalRoute,
+  type TravelMode,
+  type OptimizationObjective,
+  type OptimizationResult,
+  type LocationNode,
+  type RouteConstraints,
+} from "@/lib/optimizer";
+
 import {
   getStoredVisited,
   saveStoredVisited,
@@ -106,6 +115,17 @@ export default function Home() {
   const [locationNotice, setLocationNotice] = useState("");
   const [route, setRoute] = useState<Place[]>([]);
   const [routeToast, setRouteToast] = useState<{ message: string; placeName: string } | null>(null);
+
+  // Shortest-Path Route Optimizer State
+  const [optimizing, setOptimizing] = useState(false);
+  const [travelMode, setTravelMode] = useState<TravelMode>("WALKING");
+  const [objective, setObjective] = useState<OptimizationObjective>("FASTEST");
+  const [startConstraint, setStartConstraint] = useState<"first" | "current_gps" | "none">("first");
+  const [returnToStart, setReturnToStart] = useState(false);
+  const [lockDestination, setLockDestination] = useState(false);
+  const [dwellMinutes, setDwellMinutes] = useState(25);
+  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
+  const [originalSequence, setOriginalSequence] = useState<Place[] | null>(null);
   const [sharing, setSharing] = useState(false);
   const [livePandals, setLivePandals] = useState<Pandal[]>([]);
   const [mapDataError, setMapDataError] = useState("");
@@ -264,6 +284,175 @@ export default function Home() {
       setLocationNotice("Geolocation not supported. Distances calculated from central Kolkata.");
     }
   };
+
+  const handleFindShortestRoute = async () => {
+    if (route.length < 2) {
+      setRouteToast({
+        placeName: "Routing Notice",
+        message: "Add at least 2 pandals to calculate an optimized route.",
+      });
+      return;
+    }
+
+    setOptimizing(true);
+    try {
+      const baseStops: LocationNode[] = route.map((p, idx) => ({
+        id: p.id,
+        name: p.name,
+        locality: p.locality || "Kolkata",
+        latitude: p.latitude ?? (22.5726 + idx * 0.008),
+        longitude: p.longitude ?? (88.3639 + idx * 0.008),
+        dwellMinutes,
+        isUserOrigin: false,
+      }));
+
+      let stopsToOptimize = [...baseStops];
+      let fixedStartIndex: number | undefined = undefined;
+      let fixedEndIndex: number | undefined = undefined;
+
+      if (startConstraint === "current_gps") {
+        if (userLocation) {
+          const gpsNode: LocationNode = {
+            id: "current_gps_origin",
+            name: "My Current Location",
+            locality: "GPS Origin",
+            latitude: userLocation.lat,
+            longitude: userLocation.lng,
+            dwellMinutes: 0,
+            isUserOrigin: true,
+          };
+          stopsToOptimize = [gpsNode, ...baseStops];
+          fixedStartIndex = 0;
+        } else {
+          fixedStartIndex = 0;
+        }
+      } else if (startConstraint === "first") {
+        fixedStartIndex = 0;
+      }
+
+      if (lockDestination && stopsToOptimize.length > 2) {
+        fixedEndIndex = stopsToOptimize.length - 1;
+      }
+
+      const constraints: RouteConstraints = {
+        fixedStartIndex,
+        fixedEndIndex,
+        returnToStart,
+        startTime: new Date(),
+        dwellMinutesPerPandal: dwellMinutes,
+      };
+
+      if (!originalSequence) {
+        setOriginalSequence([...route]);
+      }
+
+      const result = await optimizePandalRoute(
+        stopsToOptimize,
+        travelMode,
+        objective,
+        constraints
+      );
+
+      setOptimizationResult(result);
+
+      // Reorder route state based on result.orderedStops
+      const reorderedPlaces: Place[] = [];
+      const seenIds = new Set<string>();
+
+      for (const stop of result.orderedStops) {
+        if (stop.id === "current_gps_origin") continue;
+        if (seenIds.has(stop.id)) continue;
+        seenIds.add(stop.id);
+
+        const original = route.find((r) => r.id === stop.id);
+        if (original) {
+          reorderedPlaces.push(original);
+        } else {
+          reorderedPlaces.push({
+            id: stop.id,
+            name: stop.name,
+            locality: stop.locality || "Kolkata",
+            category: "Pandal",
+            distance: "Stop",
+            color: "#C62828",
+            x: 50,
+            y: 50,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            facilities: [],
+            description: "",
+          });
+        }
+      }
+
+      setRoute(reorderedPlaces);
+      saveStoredRoute(reorderedPlaces);
+
+      const algoLabel = result.isExactOptimal
+        ? `Held-Karp Exact Optimal (${result.executionTimeMs.toFixed(1)}ms)`
+        : `2-Opt Heuristic (${result.executionTimeMs.toFixed(1)}ms)`;
+      setRouteToast({
+        placeName: `Shortest Route Found`,
+        message: `${algoLabel} · Total ${result.totalDistanceMeters < 1000 ? `${result.totalDistanceMeters}m` : `${(result.totalDistanceMeters / 1000).toFixed(1)}km`}`,
+      });
+    } catch (err: any) {
+      console.error("Optimization failed:", err);
+      setRouteToast({
+        placeName: "Optimization Error",
+        message: err.message || "Could not optimize route",
+      });
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const handleRevertToOriginal = () => {
+    if (!originalSequence) return;
+    setRoute([...originalSequence]);
+    saveStoredRoute(originalSequence);
+    setOptimizationResult(null);
+    setOriginalSequence(null);
+    setRouteToast({
+      placeName: "Original Order Restored",
+      message: "Reverted itinerary back to your initial order.",
+    });
+  };
+
+  const moveStop = (index: number, direction: "up" | "down") => {
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= route.length) return;
+    const next = [...route];
+    const temp = next[index];
+    next[index] = next[targetIndex];
+    next[targetIndex] = temp;
+    setRoute(next);
+    saveStoredRoute(next);
+    setOptimizationResult(null);
+  };
+
+  const routeStopMarkers = useMemo<RouteStopMarker[]>(() => {
+    if (optimizationResult && optimizationResult.orderedStops.length > 0) {
+      return optimizationResult.orderedStops
+        .filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude))
+        .map((s, idx) => ({
+          lat: s.latitude,
+          lng: s.longitude,
+          name: s.name,
+          stopIndex: idx + 1,
+          isVisited: visited.includes(s.id),
+        }));
+    }
+    return route
+      .filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))
+      .map((p, idx) => ({
+        lat: p.latitude as number,
+        lng: p.longitude as number,
+        name: p.name,
+        stopIndex: idx + 1,
+        isVisited: visited.includes(p.id),
+      }));
+  }, [route, optimizationResult, visited]);
+
 
   const toggleLiveSharing = () => {
     if (!sharing) {
@@ -560,8 +749,8 @@ export default function Home() {
 
 
       {active === "routes" && <section className={styles.screen}>
-        <p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED</p>
-        <h1>Your pujo <em>route</em></h1>
+        <p className={styles.kicker}>YOUR DAY, BEAUTIFULLY PACED · GRAPH OPTIMIZER</p>
+        <h1>Pandal Hopping <em>Optimizer</em></h1>
         {route.length === 0 ? (
           <div className={styles.emptyNotice}>
             <p>Your itinerary is currently empty.</p>
@@ -572,62 +761,401 @@ export default function Home() {
           </div>
         ) : (
           <>
-            <p className={styles.intro}>{route.length} planned stop{route.length === 1 ? "" : "s"} · ~{route.length * 35} mins visit estimate</p>
-            <div className={styles.routeSummary}>
-              <span>🚶</span>
-              <div>
-                <strong>{route.length} Pandal Stops Planned</strong>
-                <small>Turn-by-turn navigation available in Google Maps</small>
+            <p className={styles.intro}>
+              {route.length} stop{route.length === 1 ? "" : "s"} selected · ~{route.length * dwellMinutes} mins total darshan estimate
+            </p>
+
+            {/* Optimizer Settings Toolbar */}
+            <div className={styles.optimizerBox}>
+              <div className={styles.optHeader}>
+                <h3 className={styles.optTitle}>⚡ Shortest-Path Route Planner</h3>
+                <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  {route.length <= 11 ? "Held-Karp Exact DP" : "2-Opt Local Search"}
+                </span>
               </div>
-              <button
-                onClick={() => {
-                  setRoute([]);
-                  saveStoredRoute([]);
-                  setRouteToast({ placeName: "Itinerary", message: "Cleared all stops from route" });
-                }}
-                title="Clear itinerary"
-              >
-                Clear
-              </button>
-            </div>
-            <div className={styles.timeline}>
-              {route.map((p, index) => (
-                <div className={styles.stop} key={p.id}>
-                  <i className={visited.includes(p.id) ? styles.visitedStopIndex : ""}>
-                    {visited.includes(p.id) ? "✓" : index + 1}
-                  </i>
-                  <div>
-                    <strong>
-                      {p.name} {visited.includes(p.id) ? <span style={{ color: "#2e7d32", fontSize: "11px" }}>✓</span> : null}
-                    </strong>
-                    <span>{p.locality}</span>
-                    <small>Stop {index + 1} · {index === 0 ? "Starting point" : `~${index * 35} mins later`}</small>
-                  </div>
+
+              {/* Optimization Objective */}
+              <div className={styles.optSection}>
+                <label className={styles.optSectionLabel}>Optimization Preference</label>
+                <div className={styles.optPillsRow}>
                   <button
-                    onClick={() => {
-                      setRoute((r) => {
-                        const next = r.filter((x) => x.id !== p.id);
-                        saveStoredRoute(next);
-                        return next;
-                      });
-                      setRouteToast({ placeName: p.name, message: "Removed from route" });
-                    }}
-                    aria-label={`Remove ${p.name}`}
+                    className={`${styles.optPill} ${objective === "FASTEST" ? styles.optPillActive : ""}`}
+                    onClick={() => { setObjective("FASTEST"); setOptimizationResult(null); }}
+                    type="button"
                   >
-                    ×
+                    ⚡ Fastest Journey
+                  </button>
+                  <button
+                    className={`${styles.optPill} ${objective === "SHORTEST" ? styles.optPillActive : ""}`}
+                    onClick={() => { setObjective("SHORTEST"); setOptimizationResult(null); }}
+                    type="button"
+                  >
+                    📏 Shortest Distance
+                  </button>
+                  <button
+                    className={`${styles.optPill} ${objective === "MIN_WALKING" ? styles.optPillActive : ""}`}
+                    onClick={() => { setObjective("MIN_WALKING"); setOptimizationResult(null); }}
+                    type="button"
+                  >
+                    👟 Minimum Walking
                   </button>
                 </div>
-              ))}
+              </div>
+
+              {/* Travel Mode */}
+              <div className={styles.optSection}>
+                <label className={styles.optSectionLabel}>Travel Mode</label>
+                <div className={styles.optPillsRow}>
+                  <button
+                    className={`${styles.optPill} ${travelMode === "WALKING" ? styles.optPillActive : ""}`}
+                    onClick={() => { setTravelMode("WALKING"); setOptimizationResult(null); }}
+                    type="button"
+                  >
+                    🚶 Walking
+                  </button>
+                  <button
+                    className={`${styles.optPill} ${travelMode === "TRANSIT" ? styles.optPillActive : ""}`}
+                    onClick={() => { setTravelMode("TRANSIT"); setOptimizationResult(null); }}
+                    type="button"
+                  >
+                    🚇 Public Transit
+                  </button>
+                  <button
+                    className={`${styles.optPill} ${travelMode === "DRIVING" ? styles.optPillActive : ""}`}
+                    onClick={() => { setTravelMode("DRIVING"); setOptimizationResult(null); }}
+                    type="button"
+                  >
+                    🚗 Driving / Taxi
+                  </button>
+                </div>
+              </div>
+
+              {/* Constraints */}
+              <div className={styles.optConstraintsGrid}>
+                <div className={styles.optFieldRow}>
+                  <span className={styles.optFieldLabel}>📍 Start Point:</span>
+                  <select
+                    className={styles.optSelect}
+                    value={startConstraint}
+                    onChange={(e) => {
+                      setStartConstraint(e.target.value as "first" | "current_gps" | "none");
+                      setOptimizationResult(null);
+                    }}
+                  >
+                    <option value="first">Fixed: Stop #1 ({route[0]?.name.slice(0, 18)}…)</option>
+                    {userLocation && <option value="current_gps">My Current Location (GPS)</option>}
+                    <option value="none">Free (Best starting pandal)</option>
+                  </select>
+                </div>
+
+                <div className={styles.optFieldRow}>
+                  <label className={styles.optToggle}>
+                    <input
+                      type="checkbox"
+                      className={styles.optCheckbox}
+                      checked={returnToStart}
+                      onChange={(e) => { setReturnToStart(e.target.checked); setOptimizationResult(null); }}
+                    />
+                    <span>🔄 Return to start (Round-trip tour)</span>
+                  </label>
+
+                  {route.length > 2 && (
+                    <label className={styles.optToggle}>
+                      <input
+                        type="checkbox"
+                        className={styles.optCheckbox}
+                        checked={lockDestination}
+                        onChange={(e) => { setLockDestination(e.target.checked); setOptimizationResult(null); }}
+                      />
+                      <span>🏁 Lock last stop as destination</span>
+                    </label>
+                  )}
+                </div>
+
+                <div className={styles.optFieldRow}>
+                  <span className={styles.optFieldLabel}>⏳ Time per pandal:</span>
+                  <select
+                    className={styles.optSelect}
+                    value={dwellMinutes}
+                    onChange={(e) => {
+                      setDwellMinutes(Number(e.target.value));
+                      if (optimizationResult) setOptimizationResult(null);
+                    }}
+                  >
+                    <option value="15">15 mins (Quick Darshan)</option>
+                    <option value="25">25 mins (Standard Visit)</option>
+                    <option value="40">40 mins (Detailed Experience)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Prominent Find Shortest Route Button */}
+              <button
+                className={styles.findRouteBtn}
+                onClick={handleFindShortestRoute}
+                disabled={optimizing || route.length < 2}
+                id="find-shortest-route-btn"
+              >
+                {optimizing ? (
+                  <>⏳ Calculating Optimal Visiting Order…</>
+                ) : (
+                  <>⚡ Find Shortest Route</>
+                )}
+              </button>
             </div>
-            <button className={styles.addStop} onClick={() => setActive("map")}>＋ Add another stop from map</button>
-            <button className={styles.primaryWide} onClick={() => {
-              const destination = encodeURIComponent(route[route.length - 1].name + ", " + (route[route.length - 1].locality || "Kolkata"));
-              const waypoints = route.slice(0, -1).map(r => encodeURIComponent(r.name + ", " + (r.locality || "Kolkata"))).join("|");
-              window.open(`https://www.google.com/maps/dir/?api=1&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}`, "_blank");
-            }}>Open in Google Maps ↗</button>
+
+            {/* Comparison & Savings Card */}
+            {optimizationResult && (
+              <div className={styles.comparisonCard}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
+                  <span className={styles.algoBadge}>
+                    {optimizationResult.isExactOptimal ? "✨ Held-Karp Exact Optimal" : "🚀 2-Opt Local Search Heuristic"}
+                  </span>
+                  <span style={{ fontSize: "10px", color: "var(--muted)", fontWeight: "bold" }}>
+                    Solved in {optimizationResult.executionTimeMs.toFixed(1)}ms · {optimizationResult.timeComplexity}
+                  </span>
+                </div>
+
+                {optimizationResult.comparison && (optimizationResult.comparison.distanceSavedMeters > 50 || optimizationResult.comparison.durationSavedSeconds > 60) ? (
+                  <div className={styles.comparisonBanner}>
+                    <span>🎉</span>
+                    <span>
+                      Saved {(optimizationResult.comparison.distanceSavedMeters / 1000).toFixed(1)} km &amp; {Math.round(optimizationResult.comparison.durationSavedSeconds / 60)} mins ({optimizationResult.comparison.percentDurationSaved}% faster)!
+                    </span>
+                  </div>
+                ) : (
+                  <div className={styles.comparisonBanner}>
+                    <span>✓</span>
+                    <span>Arranged in optimal hopping sequence with zero unnecessary backtracking.</span>
+                  </div>
+                )}
+
+                <div className={styles.metricsGrid}>
+                  <div className={styles.metricCard}>
+                    <span className={styles.metricCardTitle}>Total Travel Distance</span>
+                    <span className={styles.metricCardValue}>
+                      {optimizationResult.totalDistanceMeters < 1000
+                        ? `${optimizationResult.totalDistanceMeters} m`
+                        : `${(optimizationResult.totalDistanceMeters / 1000).toFixed(1)} km`}
+                    </span>
+                    <span className={styles.metricCardSub}>
+                      🚶 {(optimizationResult.totalWalkingDistanceMeters / 1000).toFixed(1)} km walking
+                    </span>
+                  </div>
+                  <div className={styles.metricCard}>
+                    <span className={styles.metricCardTitle}>Transit / Travel Time</span>
+                    <span className={styles.metricCardValue}>
+                      ~{Math.round(optimizationResult.totalDurationSeconds / 60)} mins
+                    </span>
+                    <span className={styles.metricCardSub}>
+                      Road &amp; foot transit
+                    </span>
+                  </div>
+                  <div className={styles.metricCard}>
+                    <span className={styles.metricCardTitle}>Darshan / Dwell Time</span>
+                    <span className={styles.metricCardValue}>
+                      ~{route.length * dwellMinutes} mins
+                    </span>
+                    <span className={styles.metricCardSub}>
+                      {dwellMinutes}m per pandal visit
+                    </span>
+                  </div>
+                  <div className={styles.metricCard}>
+                    <span className={styles.metricCardTitle}>Door-to-Door Itinerary</span>
+                    <span className={styles.metricCardValue}>
+                      ~{Math.round((optimizationResult.totalDurationSeconds + route.length * dwellMinutes * 60) / 60)} mins
+                    </span>
+                    <span className={styles.metricCardSub}>
+                      Full festival journey
+                    </span>
+                  </div>
+                </div>
+
+                {!optimizationResult.isExactOptimal && (
+                  <small style={{ display: "block", marginTop: "8px", color: "#8c6514", fontSize: "10px" }}>
+                    * 2-Opt local search was applied for sub-second performance across {route.length} stops.
+                  </small>
+                )}
+              </div>
+            )}
+
+            {/* Route Map Preview */}
+            <div className={styles.routeMapCard}>
+              <PujaMap
+                pandals={livePandals}
+                routeStops={routeStopMarkers}
+                routePolyline={optimizationResult?.overviewPolyline}
+                userLocation={userLocation}
+              />
+            </div>
+
+            {/* Timeline of Stops with Timetable & Connecting Legs */}
+            <div className={styles.timeline}>
+              {route.map((p, index) => {
+                const prevLeg = optimizationResult?.legs && index > 0 ? optimizationResult.legs[index - 1] : undefined;
+                const nextLeg = optimizationResult?.legs && index < optimizationResult.legs.length ? optimizationResult.legs[index] : undefined;
+
+                return (
+                  <div key={p.id}>
+                    {/* Connecting Leg between stops */}
+                    {prevLeg && (
+                      <div className={styles.timelineConnector}>
+                        <div className={styles.connectorLine}></div>
+                        <span className={styles.legBadge}>
+                          {travelMode === "WALKING" ? "🚶" : travelMode === "TRANSIT" ? "🚇" : "🚗"}
+                          {" "}
+                          {prevLeg.distanceMeters < 1000
+                            ? `${prevLeg.distanceMeters}m`
+                            : `${(prevLeg.distanceMeters / 1000).toFixed(1)} km`}
+                          {" · "}
+                          ~{Math.round(prevLeg.durationSeconds / 60)} mins
+                          {prevLeg.departureTime ? ` · Departs ${prevLeg.departureTime}` : ""}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className={styles.stop}>
+                      <i className={visited.includes(p.id) ? styles.visitedStopIndex : ""}>
+                        {visited.includes(p.id) ? "✓" : index + 1}
+                      </i>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong>
+                          {p.name} {visited.includes(p.id) ? <span style={{ color: "#2e7d32", fontSize: "11px" }}>✓</span> : null}
+                        </strong>
+                        <span>{p.locality}</span>
+                        {optimizationResult ? (
+                          <small>
+                            Stop {index + 1}
+                            {index === 0
+                              ? ` · Start (Departs ~${nextLeg?.departureTime || "Now"})`
+                              : ` · Arrives ~${prevLeg?.arrivalTime || ""}${nextLeg ? ` · Departs ~${nextLeg.departureTime}` : ""}`}
+                          </small>
+                        ) : (
+                          <small>Stop {index + 1} · {index === 0 ? "Starting point" : `~${index * dwellMinutes} mins later`}</small>
+                        )}
+                      </div>
+
+                      <div className={styles.stopActionsRow}>
+                        <button
+                          className={`${styles.stopSmallBtn} ${visited.includes(p.id) ? styles.stopSmallBtnVisited : ""}`}
+                          onClick={() => toggleVisited(p.id)}
+                          title="Toggle visited"
+                        >
+                          {visited.includes(p.id) ? "✓ Visited" : "Mark"}
+                        </button>
+                        {index > 0 && (
+                          <button
+                            className={styles.stopSmallBtn}
+                            onClick={() => moveStop(index, "up")}
+                            title="Move up"
+                          >
+                            ↑
+                          </button>
+                        )}
+                        {index < route.length - 1 && (
+                          <button
+                            className={styles.stopSmallBtn}
+                            onClick={() => moveStop(index, "down")}
+                            title="Move down"
+                          >
+                            ↓
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setRoute((r) => {
+                              const next = r.filter((x) => x.id !== p.id);
+                              saveStoredRoute(next);
+                              return next;
+                            });
+                            setOptimizationResult(null);
+                            setRouteToast({ placeName: p.name, message: "Removed from route" });
+                          }}
+                          aria-label={`Remove ${p.name}`}
+                          className={styles.stopSmallBtn}
+                          style={{ color: "#c62828" }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Return to start leg indicator if enabled */}
+              {returnToStart && optimizationResult && optimizationResult.legs.length === route.length && (
+                <div className={styles.timelineConnector}>
+                  <div className={styles.connectorLine}></div>
+                  <span className={styles.legBadge} style={{ background: "#fef3e2", borderColor: "#f5bd32" }}>
+                    🔄 Return to Start: {route[0]?.name} (~{Math.round((optimizationResult.legs[optimizationResult.legs.length - 1]?.durationSeconds || 300) / 60)} mins)
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <button className={styles.addStop} onClick={() => setActive("map")}>
+              ＋ Add another stop from map
+            </button>
+
+            <button
+              className={styles.primaryWide}
+              onClick={() => {
+                const destination = encodeURIComponent(
+                  route[route.length - 1].name + ", " + (route[route.length - 1].locality || "Kolkata")
+                );
+                const waypoints = route
+                  .slice(0, -1)
+                  .map((r) => encodeURIComponent(r.name + ", " + (r.locality || "Kolkata")))
+                  .join("|");
+                const gmapMode =
+                  travelMode === "WALKING" ? "walking" : travelMode === "TRANSIT" ? "transit" : "driving";
+                window.open(
+                  `https://www.google.com/maps/dir/?api=1&destination=${destination}${waypoints ? `&waypoints=${waypoints}` : ""}&travelmode=${gmapMode}`,
+                  "_blank"
+                );
+              }}
+            >
+              Open in Google Maps ↗
+            </button>
+
+            {/* Bottom Actions Row */}
+            <div className={styles.routeBottomActions}>
+              <button
+                className={styles.revertBtn}
+                onClick={() => {
+                  saveStoredRoute(route);
+                  setRouteToast({
+                    placeName: "Route Saved",
+                    message: "Saved your itinerary stops and optimal sequence!",
+                  });
+                }}
+              >
+                💾 Save Route
+              </button>
+
+              {originalSequence ? (
+                <button className={styles.revertBtn} onClick={handleRevertToOriginal}>
+                  ↩ Revert to Original Order
+                </button>
+              ) : (
+                <button
+                  className={styles.revertBtn}
+                  onClick={() => {
+                    setRoute([]);
+                    saveStoredRoute([]);
+                    setOptimizationResult(null);
+                    setRouteToast({ placeName: "Itinerary", message: "Cleared all stops from route" });
+                  }}
+                >
+                  Clear Itinerary
+                </button>
+              )}
+            </div>
           </>
         )}
       </section>}
+
 
       {active === "connect" && <section className={styles.screen}>
         <p className={styles.kicker}>EXPLORE TOGETHER, ON YOUR TERMS</p>

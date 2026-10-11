@@ -6,6 +6,15 @@ import type { Pandal } from "@/lib/pandals";
 import styles from "./PujaMap.module.css";
 
 type Coordinates = { lat: number; lng: number };
+
+export type RouteStopMarker = {
+  lat: number;
+  lng: number;
+  name: string;
+  stopIndex: number;
+  isVisited?: boolean;
+};
+
 type Props = {
   pandals: Pandal[];
   selectedId?: string;
@@ -16,6 +25,8 @@ type Props = {
   className?: string;
   visitedIds?: string[];
   userLocation?: Coordinates | null;
+  routeStops?: RouteStopMarker[];
+  routePolyline?: string;
 };
 
 const KOLKATA = { lat: 22.5726, lng: 88.3639 };
@@ -36,12 +47,16 @@ export default function PujaMap({
   className,
   visitedIds = [],
   userLocation,
+  routeStops,
+  routePolyline,
 }: Props) {
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const userMarkerRef = useRef<google.maps.Marker | null>(null);
   const editMarkerRef = useRef<google.maps.Marker | null>(null);
+  const routeMarkersRef = useRef<google.maps.Marker[]>([]);
+  const routePolylineRef = useRef<google.maps.Polyline | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error" | "missing">(
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? "loading" : "missing"
   );
@@ -79,6 +94,8 @@ export default function PujaMap({
       cancelled = true;
       markersRef.current.forEach((marker) => marker.setMap(null));
       if (userMarkerRef.current) userMarkerRef.current.setMap(null);
+      routeMarkersRef.current.forEach((marker) => marker.setMap(null));
+      if (routePolylineRef.current) routePolylineRef.current.setMap(null);
     };
   }, [editable, onPinChange]);
 
@@ -197,6 +214,69 @@ export default function PujaMap({
     editMarkerRef.current.setPosition(pin);
     map.panTo(pin);
   }, [editable, pin, onPinChange, state]);
+
+  // Handle route markers and polyline rendering
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || state !== "ready") return;
+
+    routeMarkersRef.current.forEach((m) => m.setMap(null));
+    routeMarkersRef.current = [];
+    if (routePolylineRef.current) {
+      routePolylineRef.current.setMap(null);
+      routePolylineRef.current = null;
+    }
+
+    if (!routeStops || routeStops.length === 0) return;
+
+    const bounds = new google.maps.LatLngBounds();
+    const pathCoords: google.maps.LatLngLiteral[] = [];
+
+    routeStops.forEach((stop) => {
+      if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) return;
+      const pos = { lat: stop.lat, lng: stop.lng };
+      pathCoords.push(pos);
+      bounds.extend(pos);
+
+      const marker = new google.maps.Marker({
+        position: pos,
+        map,
+        title: `Stop #${stop.stopIndex}: ${stop.name}`,
+        zIndex: 50 + stop.stopIndex,
+        label: {
+          text: String(stop.stopIndex),
+          color: "#FFFFFF",
+          fontWeight: "bold",
+          fontSize: "12px",
+        },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 13,
+          fillColor: stop.isVisited ? "#2E7D32" : "#780D19",
+          fillOpacity: 1,
+          strokeColor: "#F5BD32",
+          strokeWeight: 3,
+        },
+      });
+
+      routeMarkersRef.current.push(marker);
+    });
+
+    if (pathCoords.length >= 2) {
+      routePolylineRef.current = new google.maps.Polyline({
+        path: pathCoords,
+        geodesic: true,
+        strokeColor: "#780D19",
+        strokeOpacity: 0.9,
+        strokeWeight: 4,
+        map,
+      });
+    }
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, 70);
+    }
+  }, [routeStops, routePolyline, state]);
 
   const recenter = () => {
     const map = mapRef.current;
