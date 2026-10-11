@@ -15,8 +15,19 @@ export type RouteStopMarker = {
   isVisited?: boolean;
 };
 
+export type MapItem = {
+  id: string;
+  name: string;
+  latitude?: number;
+  longitude?: number;
+  locality?: string;
+  address?: string;
+  category?: string;
+  [key: string]: unknown;
+};
+
 type Props = {
-  pandals: Pandal[];
+  pandals: Array<Pandal | MapItem>;
   selectedId?: string;
   onSelect?: (pandal: Pandal) => void;
   editable?: boolean;
@@ -131,60 +142,75 @@ export default function PujaMap({
     const map = mapRef.current;
     if (!map || state !== "ready") return;
     markersRef.current.forEach((marker) => marker.setMap(null));
-    markersRef.current = pandals
-      .filter((pandal) => Number.isFinite(pandal.latitude) && Number.isFinite(pandal.longitude))
-      .map((pandal) => {
-        const isSelected = pandal.id === selectedId;
-        const isVisited = visitedIds.includes(pandal.id);
-        const marker = new google.maps.Marker({
-          position: { lat: pandal.latitude, lng: pandal.longitude },
-          map,
-          title: `${pandal.name}${isVisited ? " (Visited ✓)" : ""}`,
-          zIndex: isSelected ? 30 : isVisited ? 15 : 5,
-          label: isVisited
-            ? {
-                text: "✓",
-                color: "#FFFFFF",
-                fontWeight: "bold",
-                fontSize: isSelected ? "13px" : "10px",
-              }
-            : undefined,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: isSelected ? 13 : isVisited ? 10 : 9,
-            fillColor: isVisited
-              ? isSelected ? "#1B5E20" : "#2E7D32"
-              : isSelected ? "#780D19" : "#C62828",
-            fillOpacity: 1,
-            strokeColor: isSelected
-              ? "#F5BD32"
-              : isVisited ? "#A5D6A7" : "#FFF9F0",
-            strokeWeight: isSelected ? 4 : 2,
-          },
-        });
-        marker.addListener("click", () => onSelect?.(pandal));
-        return marker;
+
+    const validPandals = pandals.filter(
+      (pandal): pandal is (Pandal | MapItem) & { latitude: number; longitude: number } =>
+        typeof pandal.latitude === "number" &&
+        typeof pandal.longitude === "number" &&
+        Number.isFinite(pandal.latitude) &&
+        Number.isFinite(pandal.longitude)
+    );
+
+    markersRef.current = validPandals.map((pandal) => {
+      const isSelected = pandal.id === selectedId;
+      const isVisited = visitedIds.includes(pandal.id);
+      const category = (pandal as { category?: string }).category;
+
+      let fillColor = isVisited
+        ? isSelected ? "#1B5E20" : "#2E7D32"
+        : isSelected ? "#780D19" : "#C62828";
+
+      if (category && category !== "Pandal") {
+        if (category === "Metro") fillColor = isSelected ? "#155724" : "#26734D";
+        else if (category === "Food") fillColor = isSelected ? "#B78103" : "#F5BD32";
+        else if (category === "Toilet") fillColor = isSelected ? "#34495E" : "#5D75A6";
+      }
+
+      const marker = new google.maps.Marker({
+        position: { lat: pandal.latitude, lng: pandal.longitude },
+        map,
+        title: `${pandal.name}${isVisited ? " (Visited ✓)" : ""}`,
+        zIndex: isSelected ? 30 : isVisited ? 15 : 5,
+        label: isVisited
+          ? {
+              text: "✓",
+              color: "#FFFFFF",
+              fontWeight: "bold",
+              fontSize: isSelected ? "13px" : "10px",
+            }
+          : undefined,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: isSelected ? 13 : isVisited ? 10 : 9,
+          fillColor,
+          fillOpacity: 1,
+          strokeColor: isSelected
+            ? "#F5BD32"
+            : isVisited ? "#A5D6A7" : "#FFF9F0",
+          strokeWeight: isSelected ? 4 : 2,
+        },
       });
+      marker.addListener("click", () => onSelect?.(pandal as any));
+      return marker;
+    });
 
     if (selectedId) {
-      const active = pandals.find((p) => p.id === selectedId);
-      if (active && Number.isFinite(active.latitude) && Number.isFinite(active.longitude)) {
+      const active = validPandals.find((p) => p.id === selectedId);
+      if (active) {
         map.panTo({ lat: active.latitude, lng: active.longitude });
-      }
-    } else if (pandals.length > 0 && !pin) {
-      const bounds = new google.maps.LatLngBounds();
-      let hasValidCoords = false;
-      pandals.forEach((p) => {
-        if (Number.isFinite(p.latitude) && Number.isFinite(p.longitude)) {
-          bounds.extend({ lat: p.latitude, lng: p.longitude });
-          hasValidCoords = true;
+        if (validPandals.length === 1) {
+          map.setZoom(15);
         }
+      }
+    } else if (validPandals.length > 0 && !pin) {
+      const bounds = new google.maps.LatLngBounds();
+      validPandals.forEach((p) => {
+        bounds.extend({ lat: p.latitude, lng: p.longitude });
       });
       if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
         bounds.extend({ lat: userLocation.lat, lng: userLocation.lng });
-        hasValidCoords = true;
       }
-      if (hasValidCoords && !bounds.isEmpty()) {
+      if (!bounds.isEmpty()) {
         map.fitBounds(bounds, 60);
       }
     }

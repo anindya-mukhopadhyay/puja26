@@ -26,6 +26,7 @@ import {
   calculateDistanceKm,
   formatDistance,
 } from "@/lib/visits";
+import { matchesSearchQuery } from "@/lib/search";
 
 type Category = "Pandal" | "Metro" | "Food" | "Toilet" | "Medical" | "Parking";
 type FilterType = Category | "All" | "Visited";
@@ -487,31 +488,59 @@ export default function Home() {
     return (name.slice(0, 2) || "AM").toUpperCase();
   }, [user]);
 
-  const visible = useMemo(
-    () =>
-      allPlaces.filter((p) => {
-        const matchesCategory =
-          filter === "All"
-            ? true
-            : filter === "Visited"
-            ? visited.includes(p.id)
-            : p.category === filter;
-        const matchesQuery = `${p.name} ${p.locality} ${p.category}`
-          .toLowerCase()
-          .includes(query.toLowerCase());
-        return matchesCategory && matchesQuery;
-      }),
-    [allPlaces, filter, query, visited]
-  );
-
-  const displayedPandals = useMemo(() => {
-    return livePlaces.filter((p) => {
+  const displayedPlaces = useMemo(() => {
+    return allPlaces.filter((p) => {
+      // 1. Filter by category or visited
       if (filter === "Visited") {
-        return visited.includes(p.id);
+        if (!visited.includes(p.id)) return false;
+      } else if (filter !== "All") {
+        if (p.category !== filter) return false;
       }
+
+      // 2. Filter by search query (space-insensitive, locality & phonetic aware)
+      if (query.trim() && !matchesSearchQuery(p, query)) {
+        return false;
+      }
+
       return true;
     });
-  }, [livePlaces, filter, visited]);
+  }, [allPlaces, filter, visited, query]);
+
+  const displayedPandals = useMemo(() => {
+    const list = [...displayedPlaces];
+    if (sortByNearest) {
+      list.sort((a, b) => {
+        if (a.distanceKm === undefined && b.distanceKm === undefined) return 0;
+        if (a.distanceKm === undefined) return 1;
+        if (b.distanceKm === undefined) return -1;
+        return a.distanceKm - b.distanceKm;
+      });
+    }
+    return list;
+  }, [displayedPlaces, sortByNearest]);
+
+  const mapPandals = useMemo(() => {
+    return displayedPandals.filter(
+      (p) =>
+        typeof p.latitude === "number" &&
+        typeof p.longitude === "number" &&
+        Number.isFinite(p.latitude) &&
+        Number.isFinite(p.longitude)
+    );
+  }, [displayedPandals]);
+
+  // When search query is entered or modified, auto-select the first matching place
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    if (displayedPandals.length > 0) {
+      const alreadyMatches = selected && displayedPandals.some((p) => p.id === selected.id);
+      if (!alreadyMatches) {
+        setSelected(displayedPandals[0]);
+      }
+    }
+  }, [query, displayedPandals, selected]);
 
   const toggleSaved = (id: string) => setSaved((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
 
@@ -555,8 +584,22 @@ export default function Home() {
       {active === "map" && <>
         <div className={styles.hero}><div><p className={styles.kicker}>SHUBHO MAHALAYA</p><h1>Find your <em>pujo.</em></h1><p>Discover pandals, plan your route, and celebrate together.</p></div><div className={styles.diya}>🪔</div></div>
         <div className={styles.searchWrap}>
-          <Icon>⌕</Icon><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search pandals, metro, toilets, food..." aria-label="Search places" />
-          <button onClick={() => setQuery("")} aria-label="Clear search">×</button>
+          <Icon>⌕</Icon>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && displayedPandals.length > 0) {
+                setSelected(displayedPandals[0]);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            placeholder="Search pandals, metro, toilets, food..."
+            aria-label="Search places"
+          />
+          {query ? (
+            <button onClick={() => setQuery("")} aria-label="Clear search">×</button>
+          ) : null}
         </div>
         <div className={styles.chips} role="tablist" aria-label="Place categories">
           <button
@@ -584,17 +627,24 @@ export default function Home() {
         </div>
         <div className={styles.mapCard}>
           <PujaMap
-            pandals={livePandals}
+            pandals={mapPandals}
             selectedId={selected?.id}
             visitedIds={visited}
             userLocation={userLocation}
             onSelect={(pandal) => {
               const matched = allPlaces.find((p) => p.id === pandal.id);
-              setSelected(matched || placeFromPandal(pandal));
+              setSelected(matched || placeFromPandal(pandal as Pandal));
             }}
           />
           <div className={styles.mapLegend}>
-            <span><i className={styles.redDot}></i> Pandals ({livePandals.length})</span>
+            <span>
+              <i className={styles.redDot}></i>{" "}
+              {query.trim()
+                ? `Matching (${mapPandals.length})`
+                : filter !== "All"
+                ? `${filter} (${mapPandals.length})`
+                : `Pandals (${mapPandals.length})`}
+            </span>
             <span><i style={{ background: "#2E7D32" }}></i> Visited ({visited.length})</span>
             {userLocation && <span><i style={{ background: "#1A73E8" }}></i> You</span>}
           </div>
@@ -606,7 +656,7 @@ export default function Home() {
           )}
           {mapDataError && <div className={styles.toast}>{mapDataError}<button onClick={() => setMapDataError("")}>Dismiss</button></div>}
         </div>
-        {selected ? (
+        {selected && displayedPandals.length > 0 ? (
           <article className={`${styles.placeCard} ${visited.includes(selected.id) ? styles.placeCardVisited : ""}`}>
             <div className={styles.placePhoto}>
               <span>{visited.includes(selected.id) ? "✓" : "দুর্গা"}</span>
@@ -669,6 +719,14 @@ export default function Home() {
               )}
             </div>
           </article>
+        ) : query.trim() ? (
+          <div className={styles.emptyNotice}>
+            <p>No places found matching &ldquo;{query}&rdquo;.</p>
+            <p className={styles.subtle}>Check your spelling or try searching for another pandal or area (e.g. New Town, Salt Lake, Baghbazar, Ballygunge).</p>
+            <button className={styles.resetSortBtn} style={{ marginTop: "10px" }} onClick={() => setQuery("")}>
+              Clear Search
+            </button>
+          </div>
         ) : (
           <div className={styles.emptyNotice}>
             <p>No published pandals found.</p>
@@ -692,12 +750,35 @@ export default function Home() {
         <div className={styles.nearbyHeading}>
           <div>
             <p className={styles.kicker}>
-              {sortByNearest ? "SORTED BY PROXIMITY" : "EXPLORE PUJOS"}
+              {query.trim()
+                ? "SEARCH RESULTS"
+                : sortByNearest
+                ? "SORTED BY PROXIMITY"
+                : "EXPLORE PUJOS"}
             </p>
-            <h2>{sortByNearest ? "Nearest Pandals" : "Published Pandals"}</h2>
+            <h2>
+              {query.trim()
+                ? `Results for "${query}" (${displayedPandals.length})`
+                : sortByNearest
+                ? "Nearest Pandals"
+                : filter === "Visited"
+                ? `Visited Pandals (${displayedPandals.length})`
+                : filter !== "All"
+                ? `${filter} Locations (${displayedPandals.length})`
+                : `Published Pandals (${displayedPandals.length})`}
+            </h2>
           </div>
           <div className={styles.nearbyActions}>
-            {sortByNearest && (
+            {query.trim() && (
+              <button
+                className={styles.resetSortBtn}
+                onClick={() => setQuery("")}
+                title="Clear search filter"
+              >
+                Clear search
+              </button>
+            )}
+            {sortByNearest && !query.trim() && (
               <button
                 className={styles.resetSortBtn}
                 onClick={() => setSortByNearest(false)}
@@ -706,29 +787,34 @@ export default function Home() {
                 Reset
               </button>
             )}
-            <button
-              className={filter === "Pandal" ? styles.seeAllBtnActive : styles.seeAllBtn}
-              onClick={() => setFilter(filter === "Pandal" ? "All" : "Pandal")}
-              title="Filter to published pandals"
-            >
-              {filter === "Pandal" ? "All places" : "See all pandals →"}
-            </button>
+            {!query.trim() && (
+              <button
+                className={filter === "Pandal" ? styles.seeAllBtnActive : styles.seeAllBtn}
+                onClick={() => setFilter(filter === "Pandal" ? "All" : "Pandal")}
+                title="Filter to published pandals"
+              >
+                {filter === "Pandal" ? "All places" : "See all pandals →"}
+              </button>
+            )}
           </div>
         </div>
         <div className={styles.nearby}>
           {displayedPandals.length === 0 ? (
             <p style={{ fontSize: "12px", color: "var(--muted)", padding: "10px 0" }}>
-              {filter === "Visited"
+              {query.trim()
+                ? `No results found matching "${query}". Try searching for another pandal name or neighborhood.`
+                : filter === "Visited"
                 ? "No visited pandals yet. Mark any pandal as visited to view it here!"
                 : "No pandals published yet."}
             </p>
           ) : (
             displayedPandals.map((p) => {
               const isVisited = visited.includes(p.id);
+              const isCurrentSelected = selected?.id === p.id;
               return (
                 <button
                   key={p.id}
-                  className={`${styles.nearbyCard} ${isVisited ? styles.nearbyCardVisited : ""}`}
+                  className={`${styles.nearbyCard} ${isVisited ? styles.nearbyCardVisited : ""} ${isCurrentSelected ? styles.nearbyCardActive : ""}`}
                   onClick={() => setSelected(p)}
                 >
                   <div className={`${styles.tinyPhoto} ${isVisited ? styles.tinyPhotoVisited : ""}`}>

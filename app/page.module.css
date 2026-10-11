@@ -19,6 +19,7 @@
 .tinyVisitedTag{display:inline-block;background:#e8f5e9;color:#1b5e20;font-size:8px;font-weight:800;padding:1px 5px;border-radius:4px;margin-top:4px;border:1px solid #c8e6c9}
 .tinyPhotoVisited{background:linear-gradient(145deg,#4caf50,#1b5e20)!important;color:#e8f5e9!important;font-weight:bold}
 .nearbyCardVisited{border-color:#a5d6a7!important;background:#fdfefd!important}
+.nearbyCardActive{border-color:var(--maroon)!important;outline:2px solid var(--gold);box-shadow:0 3px 10px rgba(120,13,25,0.18)!important}
 .nearbyDistance{display:block;font-size:9px;color:#780d19;font-weight:700;margin-top:3px}
 .visitedStopIndex{border-color:#2e7d32!important;color:#2e7d32!important;background:#e8f5e9!important}
 .routeAddBtn{border-radius:8px;font-size:10px;font-weight:700;padding:8px 10px;border:1px solid var(--maroon);color:var(--maroon);background:#fff;cursor:pointer;transition:all .15s ease}

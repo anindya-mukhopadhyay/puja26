@@ -16,6 +16,7 @@ import {
   subscribeToAdminPandals,
   updatePandal,
 } from "@/lib/pandals";
+import { matchesSearchQuery } from "@/lib/search";
 import styles from "./admin.module.css";
 
 const emptyForm: PandalInput = {
@@ -223,13 +224,7 @@ export default function AdminPage() {
 
     // 2. Search query filter
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.locality && p.locality.toLowerCase().includes(q)) ||
-          (p.address && p.address.toLowerCase().includes(q))
-      );
+      result = result.filter((p) => matchesSearchQuery(p, searchQuery));
     }
 
     // 3. Serial Alphabetical Sorting (Up to Down)
