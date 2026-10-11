@@ -9,10 +9,11 @@ export type PlaceChoice = { name: string; address: string; locality: string; lat
 export default function PandalSearch({ onPlaceSelected }: { onPlaceSelected: (place: PlaceChoice) => void }) {
   const elementRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
-  const isConfigured = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyCtDfk8jIajSqYzqAcJvzYSpjyKitnNAzE";
+  const isConfigured = Boolean(mapsKey);
 
   useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const key = mapsKey;
     if (!key || !elementRef.current) return;
     let autocomplete: google.maps.places.PlaceAutocompleteElement | undefined;
     let onSelect: ((event: google.maps.places.PlacePredictionSelectEvent) => void) | undefined;

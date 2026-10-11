@@ -5,7 +5,7 @@ import { Database, getDatabase } from "firebase/database";
 import { FirebaseStorage, getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyCaD5-ZR2cl91tohEVuNcRErK-pZYlY_SE",
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "puja26-5d19a.firebaseapp.com",
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || "https://puja26-5d19a-default-rtdb.firebaseio.com",
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "puja26-5d19a",

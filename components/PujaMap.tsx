@@ -57,12 +57,13 @@ export default function PujaMap({
   const editMarkerRef = useRef<google.maps.Marker | null>(null);
   const routeMarkersRef = useRef<google.maps.Marker[]>([]);
   const routePolylineRef = useRef<google.maps.Polyline | null>(null);
+  const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyCtDfk8jIajSqYzqAcJvzYSpjyKitnNAzE";
   const [state, setState] = useState<"loading" | "ready" | "error" | "missing">(
-    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? "loading" : "missing"
+    mapsKey ? "loading" : "missing"
   );
 
   useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const key = mapsKey;
     if (!key || !elementRef.current) return;
     let cancelled = false;
     loadGoogleMaps("maps")
