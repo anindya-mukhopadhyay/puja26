@@ -61,7 +61,7 @@ describe("Search matching utility", () => {
     expect(matchesSearchQuery(pandalNewTown, "   ")).toBe(true);
   });
 
-  it("matches Blue line and Green line metro stations", () => {
+  it("matches Blue, Green, Purple, and Yellow line metro stations", () => {
     const shyambazar = {
       name: "Shyambazar Metro Station",
       locality: "Shyambazar · Blue Line (Line 1)",
@@ -72,10 +72,25 @@ describe("Search matching utility", () => {
       locality: "Howrah Railway Station · Green Line (Line 2)",
       category: "Metro",
     };
+    const behala = {
+      name: "Behala Chowrasta Metro Station",
+      locality: "Behala Chowrasta · Purple Line (Line 3)",
+      category: "Metro",
+    };
+    const airport = {
+      name: "Jai Hind Metro Station (Airport)",
+      locality: "NSCBIA Airport · Yellow Line (Line 4)",
+      category: "Metro",
+    };
     expect(matchesSearchQuery(shyambazar, "blue line")).toBe(true);
     expect(matchesSearchQuery(shyambazar, "shyambazar metro")).toBe(true);
     expect(matchesSearchQuery(howrah, "green line")).toBe(true);
     expect(matchesSearchQuery(howrah, "howrah")).toBe(true);
+    expect(matchesSearchQuery(behala, "purple line")).toBe(true);
+    expect(matchesSearchQuery(behala, "behala chowrasta")).toBe(true);
+    expect(matchesSearchQuery(airport, "yellow line")).toBe(true);
+    expect(matchesSearchQuery(airport, "airport")).toBe(true);
+    expect(matchesSearchQuery(airport, "jai hind")).toBe(true);
   });
 });
 

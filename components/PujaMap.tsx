@@ -6,7 +6,11 @@ import type { Pandal } from "@/lib/pandals";
 import {
   BLUE_LINE_STATIONS,
   GREEN_LINE_STATIONS,
+  PURPLE_LINE_STATIONS,
+  YELLOW_LINE_STATIONS,
   ALL_METRO_STATIONS,
+  METRO_LINES,
+  getMetroLineDetails,
   getMetroMarkerSvg,
   metroStationToPlace,
   type MetroStation,
@@ -181,12 +185,25 @@ export default function PujaMap({
       const isMetro = category === "Metro" || pandal.id?.startsWith("metro-");
 
       if (isMetro) {
-        const line: MetroLineType = (pandal as { metroLine?: MetroLineType }).metroLine || (pandal.id?.includes("green") ? "green" : "blue");
-        const isInterchange = Boolean((pandal as { isInterchange?: boolean }).isInterchange) || pandal.name.toLowerCase().includes("esplanade");
+        const line: MetroLineType = (pandal as { metroLine?: MetroLineType }).metroLine ||
+          (pandal.id?.includes("green")
+            ? "green"
+            : pandal.id?.includes("purple")
+            ? "purple"
+            : pandal.id?.includes("yellow")
+            ? "yellow"
+            : "blue");
+        const isInterchange = Boolean((pandal as { isInterchange?: boolean }).isInterchange) ||
+          pandal.name.toLowerCase().includes("esplanade") ||
+          pandal.name.toLowerCase().includes("noapara") ||
+          pandal.name.toLowerCase().includes("majerhat") ||
+          pandal.name.toLowerCase().includes("barasat") ||
+          pandal.name.toLowerCase().includes("airport");
+        const details = getMetroLineDetails(line);
         const marker = new google.maps.Marker({
           position: { lat: pandal.latitude, lng: pandal.longitude },
           map,
-          title: `${pandal.name} (${line === "blue" ? "Blue Line" : "Green Line"})`,
+          title: `${pandal.name} (${details.name})`,
           zIndex: isSelected ? 40 : 15,
           icon: {
             url: getMetroMarkerSvg(line, isSelected, isInterchange),
@@ -195,13 +212,12 @@ export default function PujaMap({
           },
         });
         marker.addListener("click", () => {
-          const lineColor = line === "blue" ? "#0D47A1" : "#1B5E20";
-          const lineBadge = line === "blue" ? "Blue Line (Line 1)" : "Green Line (Line 2)";
           const content = `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 6px 8px; min-width: 190px;">
               <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-                <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${lineColor};"></span>
-                <span style="font-size: 10px; font-weight: 800; color: ${lineColor}; text-transform: uppercase; letter-spacing: 0.5px;">${lineBadge}</span>
+                <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${details.color};"></span>
+                <span style="font-size: 10px; font-weight: 800; color: ${details.color}; text-transform: uppercase; letter-spacing: 0.5px;">${details.name}</span>
+                ${isInterchange ? '<span style="background: #FFF3E0; color: #E65100; font-size: 8px; font-weight: 800; padding: 1px 4px; border-radius: 3px;">INTERCHANGE</span>' : ''}
               </div>
               <div style="font-size: 14px; font-weight: 800; color: #1a1a1a; line-height: 1.25; margin-bottom: 3px;">${pandal.name}</div>
               <div style="font-size: 11px; color: #555; line-height: 1.35; margin-bottom: 6px;">${pandal.locality || (pandal as { address?: string }).address || "Kolkata Metro"}</div>
@@ -298,67 +314,42 @@ export default function PujaMap({
       infoWindowRef.current = new google.maps.InfoWindow();
     }
 
-    // 1. Blue Line Connected Route (Line 1: North-South)
-    const bluePolyline = new google.maps.Polyline({
-      path: BLUE_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
-      geodesic: true,
-      strokeColor: "#0D47A1",
-      strokeOpacity: 0.88,
-      strokeWeight: 4,
-      zIndex: 8,
-      map,
+    // 1. Render all 4 connected Metro routes (Blue, Green, Purple, Yellow)
+    METRO_LINES.forEach((line) => {
+      const polyline = new google.maps.Polyline({
+        path: line.path,
+        geodesic: true,
+        strokeColor: line.color,
+        strokeOpacity: 0.88,
+        strokeWeight: 4,
+        zIndex: 8,
+        map,
+      });
+      polyline.addListener("click", (e: google.maps.MapMouseEvent) => {
+        if (e.latLng) {
+          infoWindowRef.current?.setContent(`
+            <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 6px 8px; line-height: 1.4;">
+              <div style="font-weight: 800; font-size: 13px; color: ${line.color};">${line.emoji} ${line.name}</div>
+              <div style="font-size: 11px; color: #333; margin-top: 2px;">${line.corridor}</div>
+              <div style="font-size: 10px; color: #666; margin-top: 3px;">${line.description}</div>
+            </div>
+          `);
+          infoWindowRef.current?.setPosition(e.latLng);
+          infoWindowRef.current?.open(map);
+        }
+      });
+      metroLinesRef.current.push(polyline);
     });
-    bluePolyline.addListener("click", (e: google.maps.MapMouseEvent) => {
-      if (e.latLng) {
-        infoWindowRef.current?.setContent(`
-          <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 6px 8px; line-height: 1.4;">
-            <div style="font-weight: 800; font-size: 13px; color: #0D47A1;">🔵 Blue Line (Line 1)</div>
-            <div style="font-size: 11px; color: #333; margin-top: 2px;">Dakshineswar ⇄ Kavi Subhash (North-South Corridor)</div>
-            <div style="font-size: 10px; color: #666; margin-top: 3px;">26 active stations connecting major North & South Kolkata pujos.</div>
-          </div>
-        `);
-        infoWindowRef.current?.setPosition(e.latLng);
-        infoWindowRef.current?.open(map);
-      }
-    });
-    metroLinesRef.current.push(bluePolyline);
 
-    // 2. Green Line Connected Route (Line 2: East-West Underwater)
-    const greenPolyline = new google.maps.Polyline({
-      path: GREEN_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
-      geodesic: true,
-      strokeColor: "#1B5E20",
-      strokeOpacity: 0.88,
-      strokeWeight: 4,
-      zIndex: 8,
-      map,
-    });
-    greenPolyline.addListener("click", (e: google.maps.MapMouseEvent) => {
-      if (e.latLng) {
-        infoWindowRef.current?.setContent(`
-          <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 6px 8px; line-height: 1.4;">
-            <div style="font-weight: 800; font-size: 13px; color: #1B5E20;">🟢 Green Line (Line 2)</div>
-            <div style="font-size: 11px; color: #333; margin-top: 2px;">Howrah Maidan ⇄ Sector V (Underwater River Corridor)</div>
-            <div style="font-size: 10px; color: #666; margin-top: 3px;">Direct underwater link connecting Howrah, Sealdah & Salt Lake pujos.</div>
-          </div>
-        `);
-        infoWindowRef.current?.setPosition(e.latLng);
-        infoWindowRef.current?.open(map);
-      }
-    });
-    metroLinesRef.current.push(greenPolyline);
-
-    // 3. Render Metro Station Markers ("M" in circle)
+    // 2. Render Metro Station Markers ("M" in circle)
     ALL_METRO_STATIONS.forEach((station) => {
       const isSelected = selectedId === station.id;
-      const isBlue = station.line === "blue";
-      const lineColor = isBlue ? "#0D47A1" : "#1B5E20";
-      const lineBadge = isBlue ? "Blue Line (Line 1)" : "Green Line (Line 2)";
+      const details = getMetroLineDetails(station.line);
 
       const marker = new google.maps.Marker({
         position: { lat: station.latitude, lng: station.longitude },
         map,
-        title: `${station.name} (${lineBadge})`,
+        title: `${station.name} (${details.name})`,
         zIndex: isSelected ? 40 : 15,
         icon: {
           url: getMetroMarkerSvg(station.line, isSelected, station.isInterchange),
@@ -371,8 +362,8 @@ export default function PujaMap({
         const content = `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 6px 8px; min-width: 190px;">
             <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${lineColor};"></span>
-              <span style="font-size: 10px; font-weight: 800; color: ${lineColor}; text-transform: uppercase; letter-spacing: 0.5px;">${lineBadge}</span>
+              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${details.color};"></span>
+              <span style="font-size: 10px; font-weight: 800; color: ${details.color}; text-transform: uppercase; letter-spacing: 0.5px;">${details.name}</span>
               ${station.isInterchange ? '<span style="background: #FFF3E0; color: #E65100; font-size: 8px; font-weight: 800; padding: 1px 4px; border-radius: 3px;">INTERCHANGE</span>' : ''}
             </div>
             <div style="font-size: 14px; font-weight: 800; color: #1a1a1a; line-height: 1.25; margin-bottom: 3px;">${station.name}</div>
@@ -390,8 +381,8 @@ export default function PujaMap({
         const content = `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 6px 8px; min-width: 190px;">
             <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${lineColor};"></span>
-              <span style="font-size: 10px; font-weight: 800; color: ${lineColor}; text-transform: uppercase; letter-spacing: 0.5px;">${lineBadge}</span>
+              <span style="display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: ${details.color};"></span>
+              <span style="font-size: 10px; font-weight: 800; color: ${details.color}; text-transform: uppercase; letter-spacing: 0.5px;">${details.name}</span>
             </div>
             <div style="font-size: 14px; font-weight: 800; color: #1a1a1a; line-height: 1.25; margin-bottom: 3px;">${station.name}</div>
             <div style="font-size: 11px; color: #555; line-height: 1.35; margin-bottom: 6px;">${station.description}</div>
@@ -526,7 +517,7 @@ export default function PujaMap({
             <button
               className={`${styles.metroToggle} ${showMetroLines ? styles.metroToggleActive : ""}`}
               onClick={() => setShowMetroLines((prev) => !prev)}
-              title="Toggle Kolkata Metro route overlay (Blue Line & Green Line)"
+              title="Toggle Kolkata Metro route overlay (Blue, Green, Purple & Yellow Lines)"
               aria-label="Toggle Kolkata Metro route overlay"
             >
               <span>🚇</span>

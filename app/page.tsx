@@ -48,7 +48,7 @@ type Place = {
   longitude?: number;
   facilities: string[];
   description: string;
-  metroLine?: "blue" | "green";
+  metroLine?: "blue" | "green" | "purple" | "yellow";
 };
 
 const civicUtilities: Place[] = [
@@ -651,6 +651,8 @@ export default function Home() {
             <span><i style={{ background: "#2E7D32" }}></i> Visited ({visited.length})</span>
             <span><i style={{ background: "#0D47A1" }}></i> Blue M (Line 1)</span>
             <span><i style={{ background: "#1B5E20" }}></i> Green M (Line 2)</span>
+            <span><i style={{ background: "#7B1FA2" }}></i> Purple M (Line 3)</span>
+            <span><i style={{ background: "#D97706" }}></i> Yellow M (Line 4)</span>
             {userLocation && <span><i style={{ background: "#1A73E8" }}></i> You</span>}
           </div>
           {locationNotice && (

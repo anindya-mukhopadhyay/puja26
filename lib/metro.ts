@@ -1,4 +1,4 @@
-export type MetroLineType = "blue" | "green";
+export type MetroLineType = "blue" | "green" | "purple" | "yellow";
 
 export type MetroStation = {
   id: string;
@@ -440,10 +440,236 @@ export const GREEN_LINE_STATIONS: MetroStation[] = [
   },
 ];
 
+export const PURPLE_LINE_STATIONS: MetroStation[] = [
+  {
+    id: "metro-purple-1",
+    name: "Joka Metro Station",
+    shortName: "Joka",
+    line: "purple",
+    latitude: 22.4497,
+    longitude: 88.3056,
+    locality: "Joka",
+    description: "South terminus of Purple Line on Diamond Harbour Road near IIM Calcutta.",
+    nearbyAreas: ["Joka", "IIM Calcutta", "Pailan", "DH Road"],
+  },
+  {
+    id: "metro-purple-2",
+    name: "Thakurpukur Metro Station",
+    shortName: "Thakurpukur",
+    line: "purple",
+    latitude: 22.4645,
+    longitude: 88.3072,
+    locality: "Thakurpukur",
+    description: "Connects Thakurpukur 3A bus stand and Diamond Harbour Road pujo zones.",
+    nearbyAreas: ["Thakurpukur", "Diamond Harbour Road", "3A Stand"],
+  },
+  {
+    id: "metro-purple-3",
+    name: "Sakherbazar Metro Station",
+    shortName: "Sakherbazar",
+    line: "purple",
+    latitude: 22.4789,
+    longitude: 88.3115,
+    locality: "Sakherbazar",
+    description: "Fast access to Sakherbazar, Silpara, and heritage Barisha community pandals.",
+    nearbyAreas: ["Sakherbazar", "Barisha", "Silpara"],
+  },
+  {
+    id: "metro-purple-4",
+    name: "Behala Chowrasta Metro Station",
+    shortName: "Behala Chowrasta",
+    line: "purple",
+    latitude: 22.4925,
+    longitude: 88.3150,
+    locality: "Behala Chowrasta",
+    description: "Durga Puja hotspot: walking distance to Behala Club, Barisha Club, and Behala Natun Dal.",
+    nearbyAreas: ["Behala Chowrasta", "Barisha Club", "Behala Club", "Natun Dal"],
+  },
+  {
+    id: "metro-purple-5",
+    name: "Behala Bazar Metro Station",
+    shortName: "Behala Bazar",
+    line: "purple",
+    latitude: 22.5020,
+    longitude: 88.3185,
+    locality: "Behala Bazar",
+    description: "Behala central marketplace and Tram Depot corridor.",
+    nearbyAreas: ["Behala Bazar", "Pathakpara", "Tram Depot"],
+  },
+  {
+    id: "metro-purple-6",
+    name: "Taratala Metro Station",
+    shortName: "Taratala",
+    line: "purple",
+    latitude: 22.5126,
+    longitude: 88.3218,
+    locality: "Taratala",
+    description: "Taratala junction: gateway to Suruchi Sangha (New Alipore) and Hyde Road.",
+    nearbyAreas: ["Taratala", "New Alipore", "Suruchi Sangha", "Hyde Road"],
+  },
+  {
+    id: "metro-purple-7",
+    name: "Majerhat Metro Station",
+    shortName: "Majerhat",
+    line: "purple",
+    isInterchange: true,
+    latitude: 22.5205,
+    longitude: 88.3248,
+    locality: "Majerhat",
+    description: "Interchange connecting Purple Line with Eastern Railway suburban and circular lines.",
+    nearbyAreas: ["Majerhat Station", "Alipore", "New Alipore", "Chetla"],
+  },
+];
+
+export const YELLOW_LINE_STATIONS: MetroStation[] = [
+  {
+    id: "metro-yellow-1",
+    name: "Noapara Metro Station",
+    shortName: "Noapara (Yellow)",
+    line: "yellow",
+    isInterchange: true,
+    latitude: 22.6375,
+    longitude: 88.3842,
+    locality: "Noapara",
+    description: "Major interchange hub connecting Line 1 (Blue Line) and Line 4 (Yellow Line).",
+    nearbyAreas: ["Noapara", "Cantonment", "North Suburbs"],
+  },
+  {
+    id: "metro-yellow-2",
+    name: "Dum Dum Cantonment Metro Station",
+    shortName: "Cantonment",
+    line: "yellow",
+    isInterchange: true,
+    latitude: 22.6415,
+    longitude: 88.4068,
+    locality: "Dum Dum Cantonment",
+    description: "Interchange with Indian Railways suburban Sealdah North line and Cantonment pujos.",
+    nearbyAreas: ["Dum Dum Cantonment", "Gorabazar", "Suburban Rail"],
+  },
+  {
+    id: "metro-yellow-3",
+    name: "Jessore Road Metro Station",
+    shortName: "Jessore Road",
+    line: "yellow",
+    latitude: 22.6475,
+    longitude: 88.4285,
+    locality: "Jessore Road",
+    description: "Station on Jessore Road connecting Dum Dum Park and Baguiati pujo areas.",
+    nearbyAreas: ["Jessore Road", "Dum Dum Park", "Baguiati Connector"],
+  },
+  {
+    id: "metro-yellow-4",
+    name: "Jai Hind Metro Station (Airport)",
+    shortName: "Jai Hind Airport",
+    line: "yellow",
+    isInterchange: true,
+    latitude: 22.6512,
+    longitude: 88.4468,
+    locality: "NSCBIA Airport",
+    description: "Large underground airport terminal station serving Netaji Subhash Chandra Bose International Airport.",
+    nearbyAreas: ["Kolkata Airport", "Terminal 2", "VIP Road"],
+  },
+  {
+    id: "metro-yellow-5",
+    name: "Birati Metro Station",
+    shortName: "Birati",
+    line: "yellow",
+    latitude: 22.6685,
+    longitude: 88.4352,
+    locality: "Birati",
+    description: "Suburban transport node connecting Birati railway station and local residential pujos.",
+    nearbyAreas: ["Birati", "Nimta", "MB Road"],
+  },
+  {
+    id: "metro-yellow-6",
+    name: "Michael Nagar Metro Station",
+    shortName: "Michael Nagar",
+    line: "yellow",
+    latitude: 22.6820,
+    longitude: 88.4410,
+    locality: "Michael Nagar",
+    description: "Industrial & residential corridor connecting Jessore Road to Badu Road.",
+    nearbyAreas: ["Michael Nagar", "Jessore Road Industrial Area"],
+  },
+  {
+    id: "metro-yellow-7",
+    name: "New Barrackpore Metro Station",
+    shortName: "New Barrackpore",
+    line: "yellow",
+    latitude: 22.6950,
+    longitude: 88.4460,
+    locality: "New Barrackpore",
+    description: "Serving New Barrackpore municipality and celebrated community Durga Pujas.",
+    nearbyAreas: ["New Barrackpore", "APJ Abdul Kalam College", "Sodepur Road"],
+  },
+  {
+    id: "metro-yellow-8",
+    name: "Madhyamgram Metro Station",
+    shortName: "Madhyamgram",
+    line: "yellow",
+    latitude: 22.7055,
+    longitude: 88.4520,
+    locality: "Madhyamgram",
+    description: "Commercial center on Jessore Road connecting Sodepur and Barasat.",
+    nearbyAreas: ["Madhyamgram Chowmatha", "Jessore Road", "Sodepur Road"],
+  },
+  {
+    id: "metro-yellow-9",
+    name: "Barasat Metro Station",
+    shortName: "Barasat",
+    line: "yellow",
+    isInterchange: true,
+    latitude: 22.7210,
+    longitude: 88.4795,
+    locality: "Barasat",
+    description: "Northern terminus of Line 4 connecting Barasat district headquarters and celebrated pujos.",
+    nearbyAreas: ["Barasat", "Champadali More", "National Highway 12"],
+  },
+];
+
 export const ALL_METRO_STATIONS: MetroStation[] = [
   ...BLUE_LINE_STATIONS,
   ...GREEN_LINE_STATIONS,
+  ...PURPLE_LINE_STATIONS,
+  ...YELLOW_LINE_STATIONS,
 ];
+
+export function getMetroLineDetails(line: MetroLineType) {
+  switch (line) {
+    case "blue":
+      return {
+        name: "Blue Line (Line 1)",
+        color: "#0D47A1",
+        emoji: "🔵",
+        corridor: "Dakshineswar ⇄ Kavi Subhash (North-South)",
+        description: "26 active stations connecting major North & South Kolkata pujos.",
+      };
+    case "green":
+      return {
+        name: "Green Line (Line 2)",
+        color: "#1B5E20",
+        emoji: "🟢",
+        corridor: "Howrah Maidan ⇄ Sector V (Underwater River Corridor)",
+        description: "Direct underwater link connecting Howrah, Sealdah & Salt Lake pujos.",
+      };
+    case "purple":
+      return {
+        name: "Purple Line (Line 3)",
+        color: "#7B1FA2",
+        emoji: "🟣",
+        corridor: "Joka ⇄ Majerhat (Diamond Harbour Road Corridor)",
+        description: "Connects Behala Chowrasta, Taratala, and southern mega pujos.",
+      };
+    case "yellow":
+      return {
+        name: "Yellow Line (Line 4)",
+        color: "#D97706",
+        emoji: "🟡",
+        corridor: "Noapara ⇄ Airport ⇄ Barasat (Jessore Road Corridor)",
+        description: "Connects Dum Dum Cantonment, Kolkata Airport & North 24 Parganas.",
+      };
+  }
+}
 
 /**
  * Returns line metadata and coordinates for rendering polylines on Google Maps.
@@ -452,16 +678,38 @@ export const METRO_LINES = [
   {
     id: "line-1-blue",
     name: "Blue Line (Line 1)",
-    corridor: "North - South Corridor",
+    corridor: "North - South Corridor (Dakshineswar ⇄ Kavi Subhash)",
     color: "#0D47A1",
+    emoji: "🔵",
+    description: "26 active stations connecting major North & South Kolkata pujos.",
     path: BLUE_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
   },
   {
     id: "line-2-green",
     name: "Green Line (Line 2)",
-    corridor: "East - West Corridor (Underwater Metro)",
+    corridor: "East - West Corridor (Howrah Maidan ⇄ Sector V)",
     color: "#1B5E20",
+    emoji: "🟢",
+    description: "Direct underwater tunnel connecting Howrah, Sealdah & Salt Lake pujos.",
     path: GREEN_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
+  },
+  {
+    id: "line-3-purple",
+    name: "Purple Line (Line 3)",
+    corridor: "Diamond Harbour Road Corridor (Joka ⇄ Majerhat)",
+    color: "#7B1FA2",
+    emoji: "🟣",
+    description: "Connects Joka, Behala Chowrasta, Taratala, and southern mega pujos.",
+    path: PURPLE_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
+  },
+  {
+    id: "line-4-yellow",
+    name: "Yellow Line (Line 4)",
+    corridor: "Jessore Road Corridor (Noapara ⇄ Airport ⇄ Barasat)",
+    color: "#D97706",
+    emoji: "🟡",
+    description: "Connects Noapara, Dum Dum Cantonment, Kolkata Airport & Barasat.",
+    path: YELLOW_LINE_STATIONS.map((s) => ({ lat: s.latitude, lng: s.longitude })),
   },
 ];
 
@@ -469,14 +717,19 @@ export const METRO_LINES = [
  * Generates an SVG data URL for a Metro station marker with the letter 'M' inside a circle.
  * - Blue Line: Circular badge with Blue 'M' and border
  * - Green Line: Circular badge with Green 'M' and border
+ * - Purple Line: Circular badge with Purple 'M' and border
+ * - Yellow Line: Circular badge with Amber/Yellow 'M' and border
  */
 export function getMetroMarkerSvg(line: MetroLineType, isSelected = false, isInterchange = false): string {
-  const color = line === "blue" ? "#0D47A1" : "#1B5E20";
+  const details = getMetroLineDetails(line);
+  const color = details.color;
   const size = isSelected ? 36 : 28;
   const radius = isSelected ? 15 : 11.5;
   const strokeWidth = isSelected ? 3.5 : 2.5;
   const fontSize = isSelected ? 15 : 12;
   const textY = isSelected ? 22.5 : 18;
+
+  const interchangeAccent = line === "blue" ? "#D97706" : line === "green" ? "#0D47A1" : line === "purple" ? "#0D47A1" : "#0D47A1";
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
     <defs>
@@ -487,7 +740,7 @@ export function getMetroMarkerSvg(line: MetroLineType, isSelected = false, isInt
     <circle cx="${size / 2}" cy="${size / 2}" r="${radius}" fill="#FFFFFF" stroke="${color}" stroke-width="${strokeWidth}" filter="url(#m-shadow)"/>
     ${
       isInterchange
-        ? `<circle cx="${size / 2}" cy="${size / 2}" r="${radius - 3.5}" fill="none" stroke="${line === "blue" ? "#1B5E20" : "#0D47A1"}" stroke-width="1.8" stroke-dasharray="3,2"/>`
+        ? `<circle cx="${size / 2}" cy="${size / 2}" r="${radius - 3.5}" fill="none" stroke="${interchangeAccent}" stroke-width="1.8" stroke-dasharray="3,2"/>`
         : ""
     }
     ${
@@ -505,31 +758,29 @@ export function getMetroMarkerSvg(line: MetroLineType, isSelected = false, isInt
  * Converts a MetroStation into a unified Place object suitable for app/page.tsx.
  */
 export function metroStationToPlace(station: MetroStation) {
-  const isBlue = station.line === "blue";
-  const lineColor = isBlue ? "#0D47A1" : "#1B5E20";
-  const lineLabel = isBlue ? "Blue Line (Line 1)" : "Green Line (Line 2)";
+  const details = getMetroLineDetails(station.line);
 
   return {
     id: station.id,
     name: station.name,
-    locality: `${station.locality} · ${lineLabel}`,
-    address: `${station.name}, Kolkata Metro (${lineLabel})`,
+    locality: `${station.locality} · ${details.name}`,
+    address: `${station.name}, Kolkata Metro (${details.name})`,
     category: "Metro" as const,
     rating: "4.9",
     reviews: 320,
     distance: "Metro Station",
-    color: lineColor,
+    color: details.color,
     x: 50,
     y: 50,
     latitude: station.latitude,
     longitude: station.longitude,
     facilities: [
-      `Metro (${isBlue ? "Blue Line" : "Green Line"})`,
+      `Metro (${details.name})`,
       station.isInterchange ? "Interchange Station" : "Rapid Transit",
       "Ticket Counter",
       "Smart Card Gate",
     ],
-    description: `${station.description} Connected via Kolkata Metro ${lineLabel}.`,
+    description: `${station.description} Connected via Kolkata Metro ${details.name}.`,
     metroLine: station.line,
   };
 }
