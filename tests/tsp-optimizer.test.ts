@@ -53,7 +53,7 @@ describe("Puja26 Shortest-Path TSP Optimizer", () => {
 
     it("matches brute-force exact optimal with fixed start and fixed end", () => {
       const stops = KOLKATA_PANDALS.slice(0, 5);
-      const { matrix } = buildGeodesicMatrix(stops, "FASTEST");
+      const { matrix } = buildGeodesicMatrix(stops, "DRIVING");
       const costMatrix = extractObjectiveCosts(matrix, "FASTEST");
 
       const fixedStart = 1; // Kumartuli
