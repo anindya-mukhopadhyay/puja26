@@ -52,6 +52,7 @@ type Props = {
   routeStops?: RouteStopMarker[];
   routePolyline?: string;
   showMetro?: boolean;
+  onLocationFound?: (coords: Coordinates) => void;
 };
 
 const KOLKATA = { lat: 22.5726, lng: 88.3639 };
@@ -75,6 +76,7 @@ export default function PujaMap({
   routeStops,
   routePolyline,
   showMetro,
+  onLocationFound,
 }: Props) {
   const elementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -103,10 +105,10 @@ export default function PujaMap({
     loadGoogleMaps("maps")
       .then(() => {
         if (cancelled || !elementRef.current) return;
-        const initialCenter = pin || userLocation || KOLKATA;
+        const initialCenter = pin || KOLKATA;
         const map = new google.maps.Map(elementRef.current, {
           center: initialCenter,
-          zoom: pin ? 15 : userLocation ? 15 : 12,
+          zoom: pin ? 15 : 12,
           styles: mapStyles,
           mapTypeControl: false,
           streetViewControl: false,
@@ -179,12 +181,6 @@ export default function PujaMap({
         radius: 180,
         zIndex: 99,
       });
-
-      // User location takes 1st priority: center map squarely on user
-      if (!userManuallySelectedRef.current && !pin) {
-        map.setCenter(userLocation);
-        map.setZoom(15);
-      }
     }
   }, [userLocation, state, pin]);
 
@@ -321,14 +317,16 @@ export default function PujaMap({
       }
     } else if (!selectedId) {
       userManuallySelectedRef.current = false;
-    } else if (!userLocation && validPandals.length > 0 && !pin && !hasFittedFallbackBoundsRef.current && !selectedId) {
-      // If user's GPS is not available at all, fit bounds once to show pandals
+    }
+
+    // On initial load, fit bounds once so user sees all pandals across Kolkata freely
+    if (!hasFittedFallbackBoundsRef.current && validPandals.length > 0 && !pin && !selectedId) {
       const bounds = new google.maps.LatLngBounds();
       validPandals.forEach((p) => {
         bounds.extend({ lat: p.latitude, lng: p.longitude });
       });
       if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, 60);
+        map.fitBounds(bounds, 50);
       }
       hasFittedFallbackBoundsRef.current = true;
     }
@@ -521,6 +519,31 @@ export default function PujaMap({
     }
   }, [routeStops, routePolyline, state]);
 
+  const fitAllPandals = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    userManuallySelectedRef.current = false;
+    const validPandals = pandals.filter(
+      (p): p is (Pandal | MapItem) & { latitude: number; longitude: number } =>
+        typeof p.latitude === "number" &&
+        typeof p.longitude === "number" &&
+        Number.isFinite(p.latitude) &&
+        Number.isFinite(p.longitude)
+    );
+    if (validPandals.length > 0) {
+      const bounds = new google.maps.LatLngBounds();
+      validPandals.forEach((p) => {
+        bounds.extend({ lat: p.latitude, lng: p.longitude });
+      });
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, 50);
+        return;
+      }
+    }
+    map.panTo(pin || KOLKATA);
+    map.setZoom(pin ? 15 : 12);
+  };
+
   const recenter = () => {
     const map = mapRef.current;
     if (!map) return;
@@ -528,9 +551,26 @@ export default function PujaMap({
     if (userLocation && Number.isFinite(userLocation.lat) && Number.isFinite(userLocation.lng)) {
       map.panTo(userLocation);
       map.setZoom(15);
+      return;
+    }
+    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          map.panTo(coords);
+          map.setZoom(15);
+          onLocationFound?.(coords);
+        },
+        (err) => {
+          console.warn("Manual geolocation request failed/denied:", err);
+          map.panTo(pin || KOLKATA);
+          map.setZoom(pin ? 15 : 12);
+        },
+        { timeout: 8000, enableHighAccuracy: true }
+      );
     } else {
       map.panTo(pin || KOLKATA);
-      map.setZoom(pin ? 15 : 13);
+      map.setZoom(pin ? 15 : 12);
     }
   };
 
@@ -552,9 +592,24 @@ export default function PujaMap({
       )}
       {state === "ready" && (
         <>
-          <button className={styles.recenter} onClick={recenter} aria-label="Recenter map" title="Recenter map">
-            ⌖
-          </button>
+          <div className={styles.mapActionsRight}>
+            <button
+              className={styles.mapBtn}
+              onClick={fitAllPandals}
+              aria-label="Show all pandals overview"
+              title="Show all pandals (Kolkata overview)"
+            >
+              ⛶
+            </button>
+            <button
+              className={styles.mapBtn}
+              onClick={recenter}
+              aria-label="Go to my location"
+              title={userLocation ? "Go to my current location (GPS)" : "Locate my position (GPS)"}
+            >
+              ⌖
+            </button>
+          </div>
           {!editable && (
             <button
               className={`${styles.metroToggle} ${showMetroLines ? styles.metroToggleActive : ""}`}

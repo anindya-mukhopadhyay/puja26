@@ -143,39 +143,11 @@ export default function Home() {
     setSaved(getStoredSaved());
     setRoute(getStoredRoute());
 
-    // Immediately restore cached location so map centers right away on reload
+    // Restore cached location if previously granted, but do NOT auto-prompt GPS
+    // or force the map camera to jump to user location (leaving navigation free style)
     const cachedLoc = getStoredUserLocation();
     if (cachedLoc) {
       setUserLocation(cachedLoc);
-    }
-
-    // Automatically request fresh current GPS position upon reload/mount
-    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
-      const handlePos = (pos: GeolocationPosition) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setUserLocation(coords);
-        saveStoredUserLocation(coords);
-      };
-
-      navigator.geolocation.getCurrentPosition(
-        handlePos,
-        (err) => {
-          console.warn("Auto-geolocation on load:", err);
-        },
-        { timeout: 10000, enableHighAccuracy: true, maximumAge: 0 }
-      );
-
-      const watchId = navigator.geolocation.watchPosition(
-        handlePos,
-        (err) => {
-          console.warn("Auto-geolocation watch:", err);
-        },
-        { timeout: 15000, enableHighAccuracy: true, maximumAge: 0 }
-      );
-
-      return () => {
-        navigator.geolocation.clearWatch(watchId);
-      };
     }
   }, []);
 
@@ -695,6 +667,10 @@ export default function Home() {
             selectedId={selected?.id}
             visitedIds={visited}
             userLocation={userLocation}
+            onLocationFound={(coords) => {
+              setUserLocation(coords);
+              saveStoredUserLocation(coords);
+            }}
             onSelect={(pandal) => {
               const matched = allPlaces.find((p) => p.id === pandal.id);
               setSelected(matched || placeFromPandal(pandal as Pandal));
@@ -714,7 +690,21 @@ export default function Home() {
             <span><i style={{ background: "#1B5E20" }}></i> Green M (Line 2)</span>
             <span><i style={{ background: "#7B1FA2" }}></i> Purple M (Line 3)</span>
             <span><i style={{ background: "#D97706" }}></i> Yellow M (Line 4)</span>
-            {userLocation && <span><i style={{ background: "#1A73E8" }}></i> You</span>}
+            {userLocation && (
+              <span
+                style={{ cursor: "pointer" }}
+                onClick={() => {
+                  setUserLocation(null);
+                  if (typeof window !== "undefined") {
+                    localStorage.removeItem("puja26_user_location_v1");
+                  }
+                  setSortByNearest(false);
+                }}
+                title="Click to clear your saved location"
+              >
+                <i style={{ background: "#1A73E8" }}></i> You ✕
+              </span>
+            )}
           </div>
           {locationNotice && (
             <div className={styles.toast}>
@@ -1153,6 +1143,10 @@ export default function Home() {
                 routeStops={routeStopMarkers}
                 routePolyline={optimizationResult?.overviewPolyline}
                 userLocation={userLocation}
+                onLocationFound={(coords) => {
+                  setUserLocation(coords);
+                  saveStoredUserLocation(coords);
+                }}
               />
             </div>
 
